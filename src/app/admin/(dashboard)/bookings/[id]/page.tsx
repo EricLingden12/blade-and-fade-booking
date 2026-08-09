@@ -9,7 +9,8 @@ import { StatusBadge } from "@/components/admin/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getBooking } from "@/lib/queries/admin";
-import { CURRENCY } from "@/lib/shop";
+import { formatMoney } from "@/lib/money";
+import { getCurrency } from "@/lib/queries/settings";
 import {
   formatDateLong,
   formatDateTime,
@@ -23,7 +24,7 @@ export default async function AdminBookingDetailPage(
   props: PageProps<"/admin/bookings/[id]">,
 ) {
   const { id } = await props.params;
-  const booking = await getBooking(id);
+  const [booking, currency] = await Promise.all([getBooking(id), getCurrency()]);
   if (!booking) notFound();
 
   return (
@@ -67,7 +68,7 @@ export default async function AdminBookingDetailPage(
               {booking.serviceName}
               <span className="block text-muted-foreground">
                 {formatDuration(booking.serviceDuration)} ·{" "}
-                {CURRENCY.format(booking.servicePrice)}
+                {formatMoney(booking.servicePrice, currency)}
               </span>
             </Row>
             <Row label="Barber">

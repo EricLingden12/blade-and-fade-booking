@@ -15,7 +15,8 @@ import {
 } from "@/components/ui/table";
 import type { BookingStatus } from "@/lib/database.types";
 import { listBookings, listStaff } from "@/lib/queries/admin";
-import { CURRENCY } from "@/lib/shop";
+import { formatMoney } from "@/lib/money";
+import { getCurrency } from "@/lib/queries/settings";
 import { formatDate, formatTimeRange, isDayKey } from "@/lib/time";
 
 export const metadata: Metadata = { title: "Bookings" };
@@ -47,7 +48,7 @@ export default async function AdminBookingsPage(
   const to = one(searchParams.to);
   const search = one(searchParams.q);
 
-  const [bookings, staff] = await Promise.all([
+  const [bookings, staff, currency] = await Promise.all([
     listBookings({
       staffId,
       status,
@@ -56,6 +57,7 @@ export default async function AdminBookingsPage(
       search,
     }),
     listStaff(),
+    getCurrency(),
   ]);
 
   return (
@@ -128,7 +130,7 @@ export default async function AdminBookingsPage(
                         <TableCell>{booking.serviceName}</TableCell>
                         <TableCell>{booking.staffName}</TableCell>
                         <TableCell className="text-right tabular-nums">
-                          {CURRENCY.format(booking.servicePrice)}
+                          {formatMoney(booking.servicePrice, currency)}
                         </TableCell>
                         <TableCell>
                           <StatusBadge status={booking.status} />
@@ -158,7 +160,7 @@ export default async function AdminBookingsPage(
                       </p>
                       <p className="text-sm text-muted-foreground">
                         {booking.serviceName} · {booking.staffName} ·{" "}
-                        {CURRENCY.format(booking.servicePrice)}
+                        {formatMoney(booking.servicePrice, currency)}
                       </p>
                     </Link>
                   </li>

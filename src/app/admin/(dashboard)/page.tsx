@@ -13,7 +13,8 @@ import { StatusBadge } from "@/components/admin/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDashboard, type AdminBooking } from "@/lib/queries/admin";
-import { CURRENCY } from "@/lib/shop";
+import { formatMoney } from "@/lib/money";
+import { getCurrency } from "@/lib/queries/settings";
 import {
   formatDate,
   formatDateLong,
@@ -25,8 +26,8 @@ import {
 export const metadata: Metadata = { title: "Dashboard" };
 
 export default async function AdminDashboardPage() {
-  const { todaysBookings, upcoming, stats, now: snapshot, today } =
-    await getDashboard();
+  const [{ todaysBookings, upcoming, stats, now: snapshot, today }, currency] =
+    await Promise.all([getDashboard(), getCurrency()]);
 
   // "Later today" excludes anything already finished, so the list shrinks as
   // the day goes on rather than sitting there stale. Uses the snapshot instant
@@ -69,7 +70,7 @@ export default async function AdminDashboardPage() {
         <Stat
           icon={CircleDollarSign}
           label="Expected this week"
-          value={CURRENCY.format(stats.weekRevenue)}
+          value={formatMoney(stats.weekRevenue, currency)}
           hint="Confirmed + completed"
         />
         <Stat

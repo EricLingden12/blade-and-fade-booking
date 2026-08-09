@@ -13,7 +13,7 @@ import { StepDetails, type DetailsDraft } from "@/components/booking/step-detail
 import { StepIndicator, STEP_LABELS } from "@/components/booking/step-indicator";
 import { Button } from "@/components/ui/button";
 import type { Service, Staff } from "@/lib/database.types";
-import { CURRENCY } from "@/lib/shop";
+import { formatMoney } from "@/lib/money";
 import {
   formatDateLong,
   formatDuration,
@@ -32,12 +32,14 @@ export function BookingWizard({
   serviceStaff,
   initialServiceId,
   initialStaffId,
+  currency,
 }: {
   services: Service[];
   staff: Staff[];
   serviceStaff: Record<string, string[]>;
   initialServiceId: string | null;
   initialStaffId: string | null;
+  currency: string;
 }) {
   const router = useRouter();
 
@@ -195,7 +197,7 @@ export function BookingWizard({
                     meta={
                       <span className="shrink-0 text-right">
                         <span className="block font-display text-lg font-semibold tabular-nums text-brand-400">
-                          {CURRENCY.format(item.price)}
+                          {formatMoney(item.price, currency)}
                         </span>
                         <span className="block text-xs text-ink-500">
                           {formatDuration(item.duration_minutes)}
@@ -309,6 +311,7 @@ export function BookingWizard({
             <Review
               service={service}
               barberName={barber?.name ?? "Any available barber"}
+              currency={currency}
               startsAt={startsAt}
               draft={draft}
               onEdit={(target) => setStep(target)}
@@ -337,7 +340,7 @@ export function BookingWizard({
               {service.name}
               <span className="mx-2 text-ink-600">·</span>
               <span className="font-medium text-ink-100">
-                {CURRENCY.format(service.price)}
+                {formatMoney(service.price, currency)}
               </span>
             </p>
           )}
@@ -382,12 +385,14 @@ function Review({
   barberName,
   startsAt,
   draft,
+  currency,
   onEdit,
 }: {
   service: Service;
   barberName: string;
   startsAt: string;
   draft: DetailsDraft;
+  currency: string;
   onEdit: (step: Step) => void;
 }) {
   const endsAt = new Date(
@@ -454,7 +459,7 @@ function Review({
         <div className="flex items-center justify-between gap-4 bg-ink-800 px-5 py-4">
           <dt className="text-sm font-medium text-ink-200">Total due at shop</dt>
           <dd className="font-display text-xl font-semibold tabular-nums text-brand-400">
-            {CURRENCY.format(service.price)}
+            {formatMoney(service.price, currency)}
           </dd>
         </div>
       </dl>

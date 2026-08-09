@@ -7,13 +7,17 @@ import {
 } from "@/components/admin/service-editor";
 import { Card, CardContent } from "@/components/ui/card";
 import { listServices } from "@/lib/queries/admin";
-import { CURRENCY } from "@/lib/shop";
+import { formatMoney } from "@/lib/money";
+import { getCurrency } from "@/lib/queries/settings";
 import { formatDuration } from "@/lib/time";
 
 export const metadata: Metadata = { title: "Services" };
 
 export default async function AdminServicesPage() {
-  const services = await listServices();
+  const [services, currency] = await Promise.all([
+    listServices(),
+    getCurrency(),
+  ]);
 
   return (
     <div className="mx-auto w-full max-w-4xl space-y-6">
@@ -26,7 +30,7 @@ export default async function AdminServicesPage() {
             Hidden services stay bookable for nobody, but keep their history.
           </p>
         </div>
-        <AddServiceButton />
+        <AddServiceButton currency={currency} />
       </div>
 
       <Card>
@@ -65,14 +69,14 @@ export default async function AdminServicesPage() {
 
                   <div className="shrink-0 text-right text-sm">
                     <p className="font-medium tabular-nums">
-                      {CURRENCY.format(service.price)}
+                      {formatMoney(service.price, currency)}
                     </p>
                     <p className="text-muted-foreground">
                       {formatDuration(service.duration_minutes)}
                     </p>
                   </div>
 
-                  <ServiceRowActions service={service} />
+                  <ServiceRowActions service={service} currency={currency} />
                 </li>
               ))}
             </ul>

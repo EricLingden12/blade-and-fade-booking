@@ -34,6 +34,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import type { Service } from "@/lib/database.types";
+import { currencySymbol } from "@/lib/money";
 
 type Draft = {
   name: string;
@@ -55,7 +56,7 @@ function toDraft(service?: Service): Draft {
   };
 }
 
-export function AddServiceButton() {
+export function AddServiceButton({ currency }: { currency: string }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -63,12 +64,18 @@ export function AddServiceButton() {
         <Plus className="size-4" />
         Add service
       </Button>
-      <ServiceDialog open={open} onOpenChange={setOpen} />
+      <ServiceDialog open={open} onOpenChange={setOpen} currency={currency} />
     </>
   );
 }
 
-export function ServiceRowActions({ service }: { service: Service }) {
+export function ServiceRowActions({
+  service,
+  currency,
+}: {
+  service: Service;
+  currency: string;
+}) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -136,6 +143,7 @@ export function ServiceRowActions({ service }: { service: Service }) {
         open={editing}
         onOpenChange={setEditing}
         service={service}
+        currency={currency}
       />
 
       <AlertDialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>
@@ -169,10 +177,12 @@ function ServiceDialog({
   open,
   onOpenChange,
   service,
+  currency,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   service?: Service;
+  currency: string;
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState<Draft>(() => toDraft(service));
@@ -263,7 +273,9 @@ function ServiceDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="service-price">Price (AED)</Label>
+              <Label htmlFor="service-price">
+                Price ({currencySymbol(currency)})
+              </Label>
               <Input
                 id="service-price"
                 type="number"

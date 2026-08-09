@@ -10,6 +10,7 @@ import {
   LogOut,
   Menu,
   Scissors,
+  Settings,
   Users,
 } from "lucide-react";
 
@@ -39,6 +40,7 @@ const NAV: NavItem[] = [
   { href: "/admin/services", label: "Services", icon: Scissors },
   { href: "/admin/staff", label: "Barbers", icon: Users },
   { href: "/admin/schedule", label: "Schedule", icon: CalendarRange },
+  { href: "/admin/settings", label: "Settings", icon: Settings },
 ];
 
 function useIsActive() {

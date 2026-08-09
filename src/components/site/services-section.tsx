@@ -3,10 +3,16 @@ import { ArrowRight, Scissors } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { Service } from "@/lib/database.types";
-import { CURRENCY } from "@/lib/shop";
+import { formatMoney } from "@/lib/money";
 import { formatDuration } from "@/lib/time";
 
-export function ServicesSection({ services }: { services: Service[] }) {
+export function ServicesSection({
+  services,
+  currency,
+}: {
+  services: Service[];
+  currency: string;
+}) {
   return (
     <section
       id="services"
@@ -21,8 +27,8 @@ export function ServicesSection({ services }: { services: Service[] }) {
             </h2>
           </div>
           <p className="max-w-sm text-sm leading-relaxed text-ink-400">
-            Every price is the price — no upsell at the chair. Prices in AED,
-            cash or card on the day.
+            Every price is the price — no upsell at the chair. Prices in{" "}
+            {currency}, cash or card on the day.
           </p>
         </div>
 
@@ -41,7 +47,7 @@ export function ServicesSection({ services }: { services: Service[] }) {
                       {service.name}
                     </h3>
                     <span className="shrink-0 font-display text-xl font-semibold tabular-nums text-brand-400">
-                      {CURRENCY.format(service.price)}
+                      {formatMoney(service.price, currency)}
                     </span>
                   </div>
 
