@@ -7,6 +7,7 @@ import { BookingCard } from "@/components/booking/booking-card";
 import { CancelBooking } from "@/components/booking/cancel-booking";
 import { Button } from "@/components/ui/button";
 import { getBookingByReference } from "@/lib/queries/bookings";
+import { getCurrency } from "@/lib/queries/settings";
 import { SHOP } from "@/lib/shop";
 import { formatDateLong, formatTime } from "@/lib/time";
 
@@ -19,7 +20,10 @@ export default async function BookingLookupPage(
   props: PageProps<"/booking/[reference]">,
 ) {
   const { reference } = await props.params;
-  const booking = await getBookingByReference(reference);
+  const [booking, currency] = await Promise.all([
+    getBookingByReference(reference),
+    getCurrency(),
+  ]);
   if (!booking) notFound();
 
   const cancelled = booking.status === "cancelled";
@@ -50,7 +54,7 @@ export default async function BookingLookupPage(
       </p>
 
       <div className="mt-8">
-        <BookingCard booking={booking} />
+        <BookingCard booking={booking} currency={currency} />
       </div>
 
       {!cancelled && !past && (

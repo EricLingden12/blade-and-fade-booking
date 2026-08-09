@@ -7,6 +7,7 @@ import { BookingCard } from "@/components/booking/booking-card";
 import { CopyReference } from "@/components/booking/copy-reference";
 import { Button } from "@/components/ui/button";
 import { getBookingByReference } from "@/lib/queries/bookings";
+import { getCurrency } from "@/lib/queries/settings";
 import { SHOP } from "@/lib/shop";
 import { formatDateLong, formatTime } from "@/lib/time";
 
@@ -37,7 +38,10 @@ export default async function ConfirmationPage(
   // Someone who landed here without a reference hasn't booked anything.
   if (!reference) redirect("/book");
 
-  const booking = await getBookingByReference(reference);
+  const [booking, currency] = await Promise.all([
+    getBookingByReference(reference),
+    getCurrency(),
+  ]);
   if (!booking) redirect(`/booking/${encodeURIComponent(reference)}`);
 
   return (
@@ -58,7 +62,7 @@ export default async function ConfirmationPage(
       <CopyReference code={booking.referenceCode} />
 
       <div className="mt-8">
-        <BookingCard booking={booking} />
+        <BookingCard booking={booking} currency={currency} />
       </div>
 
       <div className="mt-8 flex flex-col gap-3 sm:flex-row">

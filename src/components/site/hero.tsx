@@ -4,9 +4,12 @@ import { ArrowRight, MapPin } from "lucide-react";
 
 import { OpenStatus } from "@/components/site/open-status";
 import { Button } from "@/components/ui/button";
-import { SHOP } from "@/lib/shop";
+import { formatAddress } from "@/lib/location";
+import { getShopLocation } from "@/lib/queries/settings";
 
-export function Hero() {
+export async function Hero() {
+  const location = await getShopLocation();
+
   return (
     <section className="relative isolate overflow-hidden">
       <Image
@@ -62,7 +65,7 @@ export function Hero() {
           <OpenStatus className="flex items-center gap-2.5" />
           <p className="flex items-center gap-2.5">
             <MapPin className="size-4 shrink-0 text-brand-400" aria-hidden />
-            {SHOP.addressLines.join(", ")}
+            {formatAddress(location)}
           </p>
         </div>
       </div>

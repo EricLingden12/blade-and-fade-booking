@@ -9,6 +9,7 @@ import {
   getActiveStaff,
   getServiceStaffMap,
 } from "@/lib/queries/public";
+import { getCurrency } from "@/lib/queries/settings";
 import { SHOP } from "@/lib/shop";
 
 export const metadata: Metadata = {
@@ -18,11 +19,12 @@ export const metadata: Metadata = {
 };
 
 export default async function BookPage(props: PageProps<"/book">) {
-  const [searchParams, services, staff, serviceStaff] = await Promise.all([
+  const [searchParams, services, staff, serviceStaff, currency] = await Promise.all([
     props.searchParams,
     getActiveServices(),
     getActiveStaff(),
     getServiceStaffMap(),
+    getCurrency(),
   ]);
 
   if (services.length === 0 || staff.length === 0) {
@@ -45,6 +47,7 @@ export default async function BookPage(props: PageProps<"/book">) {
       services={services}
       staff={staff}
       serviceStaff={serviceStaff}
+      currency={currency}
       initialServiceId={initialServiceId}
       // Only honour a pinned barber if they actually offer the pinned service.
       initialStaffId={

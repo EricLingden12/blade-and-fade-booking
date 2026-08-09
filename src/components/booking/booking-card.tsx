@@ -1,14 +1,23 @@
 import Image from "next/image";
 import { CalendarDays, Clock, MapPin, Scissors, User } from "lucide-react";
 
+import { formatAddress } from "@/lib/location";
 import type { BookingDetail } from "@/lib/queries/bookings";
-import { CURRENCY, SHOP } from "@/lib/shop";
+import { formatMoney } from "@/lib/money";
+import { getShopLocation } from "@/lib/queries/settings";
 import { formatDateLong, formatDuration, formatTimeRange } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
 /** The at-a-glance appointment summary, shared by confirmation and lookup. */
-export function BookingCard({ booking }: { booking: BookingDetail }) {
+export async function BookingCard({
+  booking,
+  currency,
+}: {
+  booking: BookingDetail;
+  currency: string;
+}) {
   const cancelled = booking.status === "cancelled";
+  const location = await getShopLocation();
 
   return (
     <div
@@ -36,7 +45,7 @@ export function BookingCard({ booking }: { booking: BookingDetail }) {
           <p className="text-sm text-ink-400">with {booking.staffName}</p>
         </div>
         <span className="ml-auto shrink-0 font-display text-xl font-semibold tabular-nums text-brand-400">
-          {CURRENCY.format(booking.servicePrice)}
+          {formatMoney(booking.servicePrice, currency)}
         </span>
       </div>
 
@@ -55,7 +64,12 @@ export function BookingCard({ booking }: { booking: BookingDetail }) {
           {booking.customerName}
         </Row>
         <Row icon={MapPin} label="Where">
-          {SHOP.addressLines.join(", ")}
+          {formatAddress(location)}
+          {location.directionsNote && (
+            <span className="mt-1 block text-ink-400">
+              {location.directionsNote}
+            </span>
+          )}
         </Row>
         {booking.notes && (
           <Row icon={Scissors} label="Your notes">
