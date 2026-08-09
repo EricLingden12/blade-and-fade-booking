@@ -4,14 +4,19 @@ import { MAX_ADVANCE_BOOKING_DAYS } from "@/lib/shop";
 import {
   generateSlots,
   groupIntervals,
+  openingWindowFor,
   type AvailableSlot,
+  type ClosureRow,
+  type ShopHoursRow,
 } from "@/lib/slots";
 import { createAdminClient } from "@/lib/supabase/server";
 import {
   dayOfWeek,
+  minutesToWallTime,
   shiftDayKey,
   shopWallTime,
   todayInShop,
+  wallTimeToMinutes,
   type DayKey,
 } from "@/lib/time";
 
@@ -96,8 +101,13 @@ export async function getDayAvailability({
   const dayStart = shopWallTime(day, "00:00");
   const dayEnd = shopWallTime(shiftDayKey(day, 1), "00:00");
 
-  const [{ data: shifts }, { data: bookings }, { data: timeOff }] =
-    await Promise.all([
+  const [
+    { data: shifts },
+    { data: bookings },
+    { data: timeOff },
+    { data: shopHours },
+    { data: closures },
+  ] = await Promise.all([
       db
         .from("working_hours")
         .select("staff_id, start_time, end_time")
@@ -120,6 +130,15 @@ export async function getDayAvailability({
         .in("staff_id", staffIds)
         .lt("starts_at", dayEnd.toISOString())
         .gt("ends_at", dayStart.toISOString()),
+
+      db.from("shop_hours").select("day_of_week, is_open, opens, closes"),
+
+      // Only closures that cover this specific day.
+      db
+        .from("shop_closures")
+        .select("starts_on, ends_on")
+        .lte("starts_on", day)
+        .gte("ends_on", day),
     ]);
 
   if (!shifts?.length) return [];
@@ -128,10 +147,27 @@ export async function getDayAvailability({
     day,
     durationMinutes: service.duration_minutes,
     shifts,
+    opening: resolveOpening(day, shopHours, closures),
     busyByStaff: groupIntervals(bookings ?? []),
     offByStaff: groupIntervals(timeOff ?? []),
     now,
   });
+}
+
+/**
+ * Opening hours for a day, tolerating a missing `shop_hours` table.
+ *
+ * Returning `undefined` skips the clamp entirely rather than closing the shop,
+ * so a database that hasn't run the migration yet keeps selling slots off the
+ * barbers' rotas instead of silently going dark.
+ */
+function resolveOpening(
+  day: DayKey,
+  shopHours: ShopHoursRow[] | null,
+  closures: ClosureRow[] | null,
+) {
+  if (!shopHours?.length) return undefined;
+  return openingWindowFor(day, shopHours, closures ?? []);
 }
 
 export type BookingCalendar = {
@@ -174,31 +210,67 @@ export async function getBookingCalendar({
   const rangeStart = shopWallTime(minDay, "00:00");
   const rangeEnd = shopWallTime(shiftDayKey(maxDay, 1), "00:00");
 
-  const [{ data: shifts }, { data: timeOff }] = await Promise.all([
-    db
-      .from("working_hours")
-      .select("staff_id, day_of_week, start_time, end_time")
-      .in("staff_id", staffIds),
-    db
-      .from("time_off")
-      .select("staff_id, starts_at, ends_at")
-      .in("staff_id", staffIds)
-      .lt("starts_at", rangeEnd.toISOString())
-      .gt("ends_at", rangeStart.toISOString()),
-  ]);
+  const [{ data: shifts }, { data: timeOff }, { data: shopHours }, { data: closures }] =
+    await Promise.all([
+      db
+        .from("working_hours")
+        .select("staff_id, day_of_week, start_time, end_time")
+        .in("staff_id", staffIds),
+      db
+        .from("time_off")
+        .select("staff_id, starts_at, ends_at")
+        .in("staff_id", staffIds)
+        .lt("starts_at", rangeEnd.toISOString())
+        .gt("ends_at", rangeStart.toISOString()),
+      db.from("shop_hours").select("day_of_week, is_open, opens, closes"),
+      db
+        .from("shop_closures")
+        .select("starts_on, ends_on")
+        .lte("starts_on", maxDay)
+        .gte("ends_on", minDay),
+    ]);
 
   const offByStaff = groupIntervals(timeOff ?? []);
   const closedDays: DayKey[] = [];
 
   for (let day = minDay; day <= maxDay; day = shiftDayKey(day, 1)) {
+    const opening = resolveOpening(day, shopHours, closures);
+
+    // Shop shut for the day — no barber's rota can override that.
+    if (opening === null) {
+      closedDays.push(day);
+      continue;
+    }
+
     const dow = dayOfWeek(day);
     const todaysShifts = (shifts ?? []).filter(
       (shift) => shift.day_of_week === dow,
     );
 
     const anyWorkable = todaysShifts.some((shift) => {
-      const windowStart = shopWallTime(day, shift.start_time).getTime();
-      const windowEnd = shopWallTime(day, shift.end_time).getTime();
+      // Clamp to opening hours before asking whether any of the shift survives,
+      // so a rota that sits entirely outside opening hours reads as closed.
+      // Compared in minutes, not as strings: Postgres hands back `10:00:00`
+      // while a form submits `10:00`, and those don't sort against each other.
+      const startMinutes = Math.max(
+        wallTimeToMinutes(shift.start_time),
+        opening ? wallTimeToMinutes(opening.opens) : Number.NEGATIVE_INFINITY,
+      );
+      const endMinutes = Math.min(
+        wallTimeToMinutes(shift.end_time),
+        opening ? wallTimeToMinutes(opening.closes) : Number.POSITIVE_INFINITY,
+      );
+      if (endMinutes <= startMinutes) return false;
+
+      const windowStart = shopWallTime(
+        day,
+        minutesToWallTime(startMinutes),
+      ).getTime();
+      const windowEnd = shopWallTime(
+        day,
+        minutesToWallTime(endMinutes),
+      ).getTime();
+
       const off = offByStaff.get(shift.staff_id) ?? [];
       // Open unless leave swallows the entire shift.
       return !off.some(

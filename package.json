@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "seed": "node --env-file=.env.local scripts/seed.ts",
     "typecheck": "next typegen && tsc --noEmit",
-    "check": "tsx scripts/__checks__/tz.check.ts && tsx scripts/__checks__/availability.check.ts",
+    "check": "tsx scripts/__checks__/tz.check.ts && tsx scripts/__checks__/availability.check.ts && tsx scripts/__checks__/hours.check.ts && tsx scripts/__checks__/location.check.ts",
     "check:db": "node --env-file=.env.local scripts/__checks__/db.check.ts"
   },
   "dependencies": {

@@ -153,6 +153,87 @@ export interface Database {
         };
         Relationships: [];
       };
+      shop_settings: {
+        Row: {
+          id: boolean;
+          currency_code: string;
+          address_lines: string[];
+          latitude: number | null;
+          longitude: number | null;
+          map_url: string | null;
+          directions_note: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          id?: boolean;
+          currency_code?: string;
+          address_lines?: string[];
+          latitude?: number | null;
+          longitude?: number | null;
+          map_url?: string | null;
+          directions_note?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          id?: boolean;
+          currency_code?: string;
+          address_lines?: string[];
+          latitude?: number | null;
+          longitude?: number | null;
+          map_url?: string | null;
+          directions_note?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      shop_hours: {
+        Row: {
+          day_of_week: number;
+          is_open: boolean;
+          opens: string;
+          closes: string;
+          updated_at: string;
+        };
+        Insert: {
+          day_of_week: number;
+          is_open?: boolean;
+          opens?: string;
+          closes?: string;
+          updated_at?: string;
+        };
+        Update: {
+          day_of_week?: number;
+          is_open?: boolean;
+          opens?: string;
+          closes?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      shop_closures: {
+        Row: {
+          id: string;
+          starts_on: string;
+          ends_on: string;
+          reason: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          starts_on: string;
+          ends_on: string;
+          reason?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          starts_on?: string;
+          ends_on?: string;
+          reason?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       bookings: {
         Row: {
           id: string;
@@ -217,4 +298,8 @@ export type StaffService =
   Database["public"]["Tables"]["staff_services"]["Row"];
 export type WorkingHours = Database["public"]["Tables"]["working_hours"]["Row"];
 export type TimeOff = Database["public"]["Tables"]["time_off"]["Row"];
+export type ShopHours = Database["public"]["Tables"]["shop_hours"]["Row"];
+export type ShopClosure = Database["public"]["Tables"]["shop_closures"]["Row"];
 export type Booking = Database["public"]["Tables"]["bookings"]["Row"];
+export type ShopSettings =
+  Database["public"]["Tables"]["shop_settings"]["Row"];

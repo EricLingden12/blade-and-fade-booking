@@ -3,19 +3,23 @@ import { Mail, MapPin, Phone } from "lucide-react";
 
 import { InstagramIcon } from "@/components/site/instagram-icon";
 import { Logo } from "@/components/site/logo";
+import { directionsUrl } from "@/lib/location";
+import { getShopHours } from "@/lib/queries/hours";
+import { getShopLocation } from "@/lib/queries/settings";
 import { DAY_NAMES, formatWallTime, SHOP } from "@/lib/shop";
 import { dayOfWeek, todayInShop } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
-export function SiteFooter() {
+export async function SiteFooter() {
   // Highlight the current day in *shop* time, not the visitor's.
   const todayIndex = dayOfWeek(todayInShop());
+  const [location, shopHours] = await Promise.all([
+    getShopLocation(),
+    getShopHours(),
+  ]);
 
   return (
-    <footer
-      id="visit"
-      className="border-t border-white/10 bg-ink-950 text-ink-300"
-    >
+    <footer className="border-t border-white/10 bg-ink-950 text-ink-300">
       <div className="mx-auto grid w-full max-w-6xl gap-10 px-5 py-14 sm:px-8 md:grid-cols-3 md:gap-8">
         <div className="space-y-4">
           <Logo className="text-ink-50" />
@@ -40,14 +44,14 @@ export function SiteFooter() {
           </h2>
           <address className="space-y-3 text-sm not-italic">
             <a
-              href={SHOP.mapsUrl}
+              href={directionsUrl(location)}
               target="_blank"
               rel="noreferrer"
               className="flex items-start gap-2.5 transition-colors hover:text-brand-400"
             >
               <MapPin className="mt-0.5 size-4 shrink-0 text-brand-400" />
               <span>
-                {SHOP.addressLines.map((line) => (
+                {location.addressLines.map((line) => (
                   <span key={line} className="block">
                     {line}
                   </span>
@@ -76,27 +80,32 @@ export function SiteFooter() {
             Opening hours
           </h2>
           <dl className="space-y-2 text-sm">
-            {SHOP.openingHours.map((hours, day) => (
+            {shopHours.map((hours) => (
               <div
-                key={DAY_NAMES[day]}
+                key={hours.day_of_week}
                 className={cn(
                   "flex justify-between gap-4",
-                  day === todayIndex && "font-medium text-brand-400",
+                  hours.day_of_week === todayIndex &&
+                    "font-medium text-brand-400",
                 )}
               >
-                <dt className={day === todayIndex ? "" : "text-ink-400"}>
-                  {DAY_NAMES[day]}
-                  {day === todayIndex && (
+                <dt
+                  className={
+                    hours.day_of_week === todayIndex ? "" : "text-ink-400"
+                  }
+                >
+                  {DAY_NAMES[hours.day_of_week]}
+                  {hours.day_of_week === todayIndex && (
                     <span className="sr-only"> (today)</span>
                   )}
                 </dt>
                 <dd
                   className={cn(
                     "tabular-nums",
-                    day === todayIndex ? "" : "text-ink-200",
+                    hours.day_of_week === todayIndex ? "" : "text-ink-200",
                   )}
                 >
-                  {hours
+                  {hours.is_open
                     ? `${formatWallTime(hours.opens)} – ${formatWallTime(hours.closes)}`
                     : "Closed"}
                 </dd>

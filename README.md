@@ -30,6 +30,11 @@ cp .env.example .env.local     # fill in your Supabase keys
 [`supabase/schema.sql`](supabase/schema.sql), and run it. It's idempotent — safe
 to re-run whenever you change it.
 
+`schema.sql` is the complete, current schema, so a fresh database needs nothing
+else. The numbered files in [`supabase/migrations/`](supabase/migrations) exist
+only for a database created before a given feature: run the ones you're missing,
+in order. Each is idempotent too.
+
 **2. Turn off public sign-ups.** Supabase → Authentication → Providers → Email →
 disable *Allow new users to sign up*. The admin policies treat "authenticated"
 as "staff", so this is what stops anyone signing themselves into your dashboard.
@@ -113,11 +118,19 @@ barber is free, and never anyone else's booking.
 
 ### Verification
 
-`npm run check` drives the pure slot maths directly — 35 assertions covering
-UTC↔Dubai conversion, day rollover, the 15-minute grid, the turnover buffer,
-lead time, leave, split shifts and the "any barber" union. The timezone half
-passes with the *server* clock set to Los Angeles, Kiritimati, Midway and Lord
-Howe (a half-hour offset), so nothing depends on the host machine's timezone.
+`npm run check` drives the pure logic directly — 94 assertions across four
+suites, no database and no network:
+
+| Suite | Covers |
+| --- | --- |
+| `tz` | UTC↔Dubai conversion, day rollover, day-key round trips |
+| `availability` | the 15-minute grid, turnover buffer, lead time, leave, split shifts, the "any barber" union |
+| `hours` | shop opening hours, calendar closures, and clamping a barber's shift to them |
+| `location` | parsing pasted map links into coordinates, and building map/directions URLs |
+
+The timezone half passes with the *server* clock set to Los Angeles, Kiritimati,
+Midway and Lord Howe (a half-hour offset), so nothing depends on the host
+machine's timezone.
 
 `npm run check:db` proves the two things only a live Postgres can: that two
 simultaneous bookings for the same chair cannot both succeed, and that the anon
@@ -191,15 +204,30 @@ src/
     ui/                shadcn/ui primitives
   lib/
     availability.ts    slot generation — the core of the app
+    slots.ts           the pure slot maths, separately checked
     time.ts            the only place shop-timezone conversion happens
-    shop.ts            booking rules and shop details, in one place
+    shop.ts            booking rules and fixed shop details
+    money.ts           currency list and price formatting
+    location.ts        map-link parsing and directions URLs
     queries/           server-side reads, split by audience
     supabase/          browser / server / service-role clients
 supabase/
   schema.sql           tables, constraints, RLS — run this first
+  migrations/          incremental upgrades for an existing database
 scripts/
   seed.ts              demo data
+  __checks__/          the four verification suites
 ```
+
+### What the owner can change without a deploy
+
+Currency, address and map pin live in `shop_settings`; opening hours and holiday
+closures live in `shop_hours` and `shop_closures`. All of them are editable from
+`/admin`, and every read falls back to a sensible default rather than throwing,
+so a missing row can never take the site down.
+
+Opening hours are the outer boundary for availability: a barber's shift is
+clamped to them, so a rota that runs past closing stops selling at closing.
 
 ### A note on theming
 

@@ -151,6 +151,110 @@ create index if not exists bookings_starts_idx
 create index if not exists bookings_status_starts_idx
   on public.bookings (status, starts_at);
 
+-- Single-row shop configuration. The `id` check enforces "exactly one row", so
+-- reads never have to pick one and writes cannot fork the configuration.
+create table if not exists public.shop_settings (
+  id              boolean primary key default true,
+  currency_code   text not null default 'AED',
+
+  -- Where the shop is. Editable by the owner so a move doesn't need a deploy.
+  address_lines   text[] not null
+    default array['Unit 4, Al Fahidi Street', 'Bur Dubai, Dubai, UAE'],
+  -- Nullable as a pair: an address can be published before anyone drops a pin.
+  latitude        numeric(9, 6),
+  longitude       numeric(9, 6),
+  -- Optional override for "Get directions"; built from coordinates when null.
+  map_url         text,
+  -- The things a pin can't say: "above the pharmacy", "parking round the back".
+  directions_note text,
+
+  updated_at      timestamptz not null default now(),
+
+  constraint shop_settings_singleton check (id),
+  constraint shop_settings_currency_shape check (currency_code ~ '^[A-Z]{3}$'),
+  constraint shop_settings_address_shape check (
+    -- coalesce matters: array_length of an empty array is NULL, not 0, and a
+    -- CHECK that evaluates to NULL *passes*. Without this, '{}' slips through
+    -- and the site renders a shop with no address.
+    coalesce(array_length(address_lines, 1), 0) between 1 and 4
+    and array_position(address_lines, '') is null
+    and array_position(address_lines, null) is null
+  ),
+  constraint shop_settings_latitude_range check (
+    latitude is null or latitude between -90 and 90
+  ),
+  constraint shop_settings_longitude_range check (
+    longitude is null or longitude between -180 and 180
+  ),
+  -- Half a coordinate is not a location.
+  constraint shop_settings_coords_paired check (
+    (latitude is null) = (longitude is null)
+  ),
+  -- Keeps `javascript:` and friends out of an href we render.
+  constraint shop_settings_map_url_shape check (
+    map_url is null or map_url ~ '^https?://'
+  )
+);
+
+comment on table public.shop_settings is
+  'Single-row shop configuration. Currency is a display label only — prices in services.price are not converted when it changes.';
+
+insert into public.shop_settings (id, currency_code, latitude, longitude)
+  values (true, 'AED', 25.263600, 55.297200)
+  on conflict (id) do nothing;
+
+-- ----------------------------------------------------------------------------
+-- Shop opening hours
+--
+-- One row per weekday, keyed by the day itself so the week can never be
+-- half-defined. These are the outer boundary for availability: a barber's
+-- shift is clamped to them, so a shift that runs past closing sells nothing
+-- after closing.
+-- ----------------------------------------------------------------------------
+
+create table if not exists public.shop_hours (
+  day_of_week smallint primary key,
+  is_open     boolean not null default true,
+  opens       time not null default '10:00',
+  closes      time not null default '21:00',
+  updated_at  timestamptz not null default now(),
+
+  constraint shop_hours_day_range check (day_of_week between 0 and 6),
+  -- Times survive a day being closed, so reopening restores what was there.
+  constraint shop_hours_ordered check (closes > opens)
+);
+
+comment on column public.shop_hours.day_of_week is '0 = Sunday … 6 = Saturday, matching JS getDay().';
+comment on column public.shop_hours.opens is 'Wall-clock time in the shop timezone (Asia/Dubai), not UTC.';
+
+insert into public.shop_hours (day_of_week, is_open, opens, closes) values
+  (0, true, '12:00', '18:00'),
+  (1, true, '10:00', '21:00'),
+  (2, true, '10:00', '21:00'),
+  (3, true, '10:00', '21:00'),
+  (4, true, '10:00', '21:00'),
+  (5, true, '10:00', '21:00'),
+  (6, true, '09:00', '21:00')
+on conflict (day_of_week) do nothing;
+
+-- Whole-day shutdowns: Eid, a public holiday, a refurbishment week.
+--
+-- `date`, not `timestamptz`, on purpose: a holiday is a calendar day in Dubai,
+-- not an instant, and must mean the same thing on every server.
+create table if not exists public.shop_closures (
+  id         uuid primary key default gen_random_uuid(),
+  starts_on  date not null,
+  ends_on    date not null,
+  reason     text,
+  created_at timestamptz not null default now(),
+
+  -- Inclusive: a one-day closure has starts_on = ends_on.
+  constraint shop_closures_ordered check (ends_on >= starts_on)
+);
+
+create index if not exists shop_closures_range_idx
+  on public.shop_closures (starts_on, ends_on);
+
 -- ----------------------------------------------------------------------------
 -- Double-booking prevention
 --
@@ -256,6 +360,16 @@ create trigger bookings_touch_updated_at
   before update on public.bookings
   for each row execute function public.touch_updated_at();
 
+drop trigger if exists shop_settings_touch_updated_at on public.shop_settings;
+create trigger shop_settings_touch_updated_at
+  before update on public.shop_settings
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists shop_hours_touch_updated_at on public.shop_hours;
+create trigger shop_hours_touch_updated_at
+  before update on public.shop_hours
+  for each row execute function public.touch_updated_at();
+
 -- ============================================================================
 -- Row Level Security
 --
@@ -276,6 +390,9 @@ alter table public.staff_services enable row level security;
 alter table public.working_hours  enable row level security;
 alter table public.time_off       enable row level security;
 alter table public.bookings       enable row level security;
+alter table public.shop_settings  enable row level security;
+alter table public.shop_hours     enable row level security;
+alter table public.shop_closures  enable row level security;
 
 revoke all on public.services       from anon, authenticated;
 revoke all on public.staff          from anon, authenticated;
@@ -283,10 +400,17 @@ revoke all on public.staff_services from anon, authenticated;
 revoke all on public.working_hours  from anon, authenticated;
 revoke all on public.time_off       from anon, authenticated;
 revoke all on public.bookings       from anon, authenticated;
+revoke all on public.shop_settings  from anon, authenticated;
+revoke all on public.shop_hours     from anon, authenticated;
+revoke all on public.shop_closures  from anon, authenticated;
 
 grant select on public.services to anon;
 grant select on public.staff    to anon;
 grant insert on public.bookings to anon;
+-- The currency appears on every public price, so anon must be able to read it.
+grant select on public.shop_settings to anon;
+grant select on public.shop_hours    to anon;
+grant select on public.shop_closures to anon;
 
 grant select, insert, update, delete on public.services       to authenticated;
 grant select, insert, update, delete on public.staff          to authenticated;
@@ -294,6 +418,12 @@ grant select, insert, update, delete on public.staff_services to authenticated;
 grant select, insert, update, delete on public.working_hours  to authenticated;
 grant select, insert, update, delete on public.time_off       to authenticated;
 grant select, insert, update, delete on public.bookings       to authenticated;
+-- No insert or delete: the singleton row is seeded above and must stay.
+grant select, update on public.shop_settings to authenticated;
+-- shop_hours gets no insert/delete: the seven rows are seeded and the week
+-- must stay complete. Closing a day is is_open = false, not a delete.
+grant select, update on public.shop_hours to authenticated;
+grant select, insert, update, delete on public.shop_closures to authenticated;
 
 -- The seed script and all server-side reads run as service_role. Granted
 -- explicitly rather than relying on Supabase's default privileges.
@@ -303,6 +433,7 @@ grant all on public.staff_services to service_role;
 grant all on public.working_hours  to service_role;
 grant all on public.time_off       to service_role;
 grant all on public.bookings       to service_role;
+grant all on public.shop_settings  to service_role;
 
 -- --- services ---------------------------------------------------------------
 
@@ -393,6 +524,27 @@ create policy "Anyone may request a booking"
 drop policy if exists "Staff manage bookings" on public.bookings;
 create policy "Staff manage bookings"
   on public.bookings for all
+  to authenticated
+  using (true)
+  with check (true);
+
+-- --- shop_settings -----------------------------------------------------------
+
+drop policy if exists "Shop settings are public" on public.shop_settings;
+create policy "Shop settings are public"
+  on public.shop_settings for select
+  to anon
+  using (true);
+
+drop policy if exists "Staff read shop settings" on public.shop_settings;
+create policy "Staff read shop settings"
+  on public.shop_settings for select
+  to authenticated
+  using (true);
+
+drop policy if exists "Staff update shop settings" on public.shop_settings;
+create policy "Staff update shop settings"
+  on public.shop_settings for update
   to authenticated
   using (true)
   with check (true);

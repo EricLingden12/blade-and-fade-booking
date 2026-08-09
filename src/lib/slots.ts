@@ -4,6 +4,7 @@ import {
   SLOT_INTERVAL_MINUTES,
 } from "@/lib/shop";
 import {
+  dayOfWeek,
   minutesToWallTime,
   shopWallTime,
   wallTimeToMinutes,
@@ -43,6 +44,15 @@ export type Shift = {
   end_time: string;
 };
 
+/**
+ * The shop's own opening window for a day, in shop-local wall clock.
+ *
+ * `null` means the shop is shut that day — either the weekday is switched off
+ * or the date falls inside a closure. Nothing is offered, whatever the barbers'
+ * rotas say.
+ */
+export type OpeningWindow = { opens: string; closes: string } | null;
+
 export function overlaps(a: Interval, b: Interval): boolean {
   return a.start < b.end && a.end > b.start;
 }
@@ -55,6 +65,7 @@ export function generateSlots({
   day,
   durationMinutes,
   shifts,
+  opening,
   busyByStaff,
   offByStaff,
   now,
@@ -62,12 +73,24 @@ export function generateSlots({
   day: DayKey;
   durationMinutes: number;
   shifts: Shift[];
+  /**
+   * Shop opening hours for this day. Barber shifts are clamped to it, so a rota
+   * that runs past closing stops selling at closing. Omit (or pass `undefined`)
+   * to skip the clamp entirely; pass `null` to mean "shut".
+   */
+  opening?: OpeningWindow;
   /** Non-cancelled bookings, keyed by barber. */
   busyByStaff: Map<string, Interval[]>;
   /** Time-off blocks, keyed by barber. */
   offByStaff: Map<string, Interval[]>;
   now: Date;
 }): AvailableSlot[] {
+  // Shut is shut: a barber rostered on a closed day still sells nothing.
+  if (opening === null) return [];
+
+  const openFrom = opening ? wallTimeToMinutes(opening.opens) : null;
+  const openUntil = opening ? wallTimeToMinutes(opening.closes) : null;
+
   const bufferMs = BOOKING_BUFFER_MINUTES * 60_000;
   const durationMs = durationMinutes * 60_000;
   const earliest = now.getTime() + MIN_LEAD_TIME_MINUTES * 60_000;
@@ -76,8 +99,19 @@ export function generateSlots({
   const found = new Map<string, string[]>();
 
   for (const shift of shifts) {
-    const windowStart = wallTimeToMinutes(shift.start_time);
-    const windowEnd = wallTimeToMinutes(shift.end_time);
+    // Intersect the barber's shift with the shop's opening window. A barber
+    // rostered 09:00-19:00 in a shop that opens at 10:00 starts selling at
+    // 10:00; one whose whole shift falls outside opening hours sells nothing.
+    const windowStart = Math.max(
+      wallTimeToMinutes(shift.start_time),
+      openFrom ?? Number.NEGATIVE_INFINITY,
+    );
+    const windowEnd = Math.min(
+      wallTimeToMinutes(shift.end_time),
+      openUntil ?? Number.POSITIVE_INFINITY,
+    );
+    if (windowEnd <= windowStart) continue;
+
     const busy = busyByStaff.get(shift.staff_id) ?? [];
     const off = offByStaff.get(shift.staff_id) ?? [];
 
@@ -119,6 +153,53 @@ export function generateSlots({
       // De-duplicate: a split shift can offer the same minute twice.
       staffIds: [...new Set(ids)],
     }));
+}
+
+export type ShopHoursRow = {
+  day_of_week: number;
+  is_open: boolean;
+  opens: string;
+  closes: string;
+};
+
+/** Inclusive range of shop-local calendar days. */
+export type ClosureRow = {
+  starts_on: string;
+  ends_on: string;
+  reason?: string | null;
+};
+
+/** Is this calendar day inside a shop-wide closure? */
+export function closureFor<T extends ClosureRow>(
+  day: DayKey,
+  closures: T[],
+): T | null {
+  // `yyyy-MM-dd` sorts lexicographically the same way it sorts chronologically,
+  // so plain string comparison is correct here and avoids constructing dates.
+  return (
+    closures.find(
+      (closure) => closure.starts_on <= day && day <= closure.ends_on,
+    ) ?? null
+  );
+}
+
+/**
+ * The shop's opening window for one calendar day, or `null` when it's shut.
+ *
+ * A closure beats the weekly hours: the shop can be "open on Wednesdays" and
+ * still shut on this particular Wednesday because it's a public holiday.
+ */
+export function openingWindowFor(
+  day: DayKey,
+  hours: ShopHoursRow[],
+  closures: ClosureRow[] = [],
+): OpeningWindow {
+  if (closureFor(day, closures)) return null;
+
+  const today = hours.find((row) => row.day_of_week === dayOfWeek(day));
+  if (!today || !today.is_open) return null;
+
+  return { opens: today.opens, closes: today.closes };
 }
 
 /** Group booking/time-off rows into per-barber interval lists. */

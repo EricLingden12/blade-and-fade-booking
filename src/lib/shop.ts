@@ -26,38 +26,12 @@ export const SHOP = {
   tagline: "Sharp cuts. No waiting.",
   phone: "+971 4 555 0182",
   email: "hello@bladeandfade.ae",
-  addressLines: ["Unit 4, Al Fahidi Street", "Bur Dubai, Dubai, UAE"],
-  mapsUrl: "https://maps.google.com/?q=Al+Fahidi+Street+Dubai",
   instagram: "https://instagram.com",
-  /**
-   * Advertised shop hours, indexed by day of week (0 = Sunday).
-   * `null` means closed.
-   *
-   * This is the *storefront* promise. Whether a specific chair is bookable at a
-   * given moment is decided by `working_hours` in the database — these two can
-   * legitimately differ (a barber may start late on a quiet Tuesday).
-   */
-  openingHours: [
-    { opens: "12:00", closes: "18:00" }, // Sunday
-    { opens: "10:00", closes: "21:00" },
-    { opens: "10:00", closes: "21:00" },
-    { opens: "10:00", closes: "21:00" },
-    { opens: "10:00", closes: "21:00" },
-    { opens: "10:00", closes: "21:00" },
-    { opens: "09:00", closes: "21:00" }, // Saturday
-  ] as ReadonlyArray<{ opens: string; closes: string } | null>,
+  // Address, map pin and opening hours are *not* here — they live in the
+  // database so the owner can change them from /admin without a deploy. Read
+  // them with `getShopLocation()` and `getShopHours()`.
 } as const;
 
-export const CURRENCY = {
-  code: "AED",
-  /** Prices are stored as a numeric column; format them the same way everywhere. */
-  format(amount: number): string {
-    return `AED ${amount.toLocaleString("en-AE", {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2,
-    })}`;
-  },
-} as const;
 
 export const DAY_NAMES = [
   "Sunday",
@@ -89,7 +63,3 @@ export function formatWallTime(time: string): string {
     : `${hour}:${String(mm).padStart(2, "0")} ${period}`;
 }
 
-/** Advertised hours for a given weekday, or `null` when the shop is shut. */
-export function hoursForDay(dayOfWeek: number) {
-  return SHOP.openingHours[dayOfWeek] ?? null;
-}

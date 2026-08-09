@@ -3,6 +3,8 @@ import "server-only";
 import type {
   BookingStatus,
   Service,
+  ShopClosure,
+  ShopHours,
   Staff,
   TimeOff,
   WorkingHours,
@@ -307,5 +309,40 @@ export async function listTimeOff(): Promise<TimeOff[]> {
     .select("*")
     .gte("ends_at", new Date().toISOString())
     .order("starts_at", { ascending: true });
+  return data ?? [];
+}
+
+export async function listShopHours(): Promise<ShopHours[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("shop_hours")
+    .select("*")
+    .order("day_of_week", { ascending: true });
+
+  if (error) {
+    reportQueryError("shop hours", error);
+    return [];
+  }
+  return data ?? [];
+}
+
+/**
+ * Closures that haven't finished yet, soonest first.
+ *
+ * Past ones are left in the table but hidden: the admin is planning ahead, and
+ * a growing list of expired holidays is noise.
+ */
+export async function listClosures(): Promise<ShopClosure[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("shop_closures")
+    .select("*")
+    .gte("ends_on", todayInShop())
+    .order("starts_on", { ascending: true });
+
+  if (error) {
+    reportQueryError("shop closures", error);
+    return [];
+  }
   return data ?? [];
 }
