@@ -28,7 +28,9 @@ export function LoginForm({ next }: { next: string | null }) {
           autoComplete="username"
           required
           autoFocus
-          placeholder="owner@bladeandfade.ae"
+          // Generic on purpose: the real admin address was here, which handed
+          // a stranger half the credentials before they'd typed anything.
+          placeholder="you@example.com"
           className="h-11"
         />
       </div>
