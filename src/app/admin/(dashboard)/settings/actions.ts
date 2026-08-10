@@ -14,6 +14,28 @@ import { createClient } from "@/lib/supabase/server";
 
 export type ActionResult = { ok: boolean; message: string };
 
+/**
+ * Turn a write failure into something the person reading it can act on.
+ *
+ * PGRST204/42703 mean the column isn't there — the app is ahead of the
+ * database because a migration hasn't been run. That is by far the likeliest
+ * cause of a failed save in this project, and "Couldn't save" sends the reader
+ * hunting for a bug that doesn't exist.
+ */
+function describeWriteError(
+  error: { code?: string; message: string },
+  what: string,
+  migration: string,
+): string {
+  if (error.code === "PGRST204" || error.code === "42703") {
+    return `The database is missing a column for this. Run supabase/migrations/${migration} in the Supabase SQL editor, then try again.`;
+  }
+  if (error.code === "42501") {
+    return "That account isn't allowed to change settings.";
+  }
+  return `Couldn't save ${what}.`;
+}
+
 const currencySchema = z
   .string()
   .trim()
@@ -36,7 +58,10 @@ export async function updateCurrencyAction(
 
   if (error) {
     console.error("[admin] updateCurrency:", error.message);
-    return { ok: false, message: "Couldn't save that currency." };
+    return {
+      ok: false,
+      message: describeWriteError(error, "that currency", "0001_shop_settings.sql"),
+    };
   }
 
   // The currency appears on every price, public and admin alike.
@@ -82,7 +107,10 @@ export async function updateDepositAction(input: {
 
   if (error) {
     console.error("[admin] updateDeposit:", error.message);
-    return { ok: false, message: "Couldn't save the deposit setting." };
+    return {
+      ok: false,
+      message: describeWriteError(error, "the deposit setting", "0005_deposits.sql"),
+    };
   }
 
   // The deposit shows on the booking wizard and the review step.
@@ -201,7 +229,10 @@ export async function updateLocationAction(
 
   if (error) {
     console.error("[admin] updateLocation:", error.message);
-    return { ok: false, message: "Couldn't save the location." };
+    return {
+      ok: false,
+      message: describeWriteError(error, "the location", "0002_shop_location.sql"),
+    };
   }
 
   // The address is in the footer, so it is on every page.
@@ -271,7 +302,10 @@ export async function updateBookingRulesAction(input: {
 
   if (error) {
     console.error("[admin] updateBookingRules:", error.message);
-    return { ok: false, message: "Couldn't save the booking rules." };
+    return {
+      ok: false,
+      message: describeWriteError(error, "the booking rules", "0006_booking_rules.sql"),
+    };
   }
 
   // These reshape every offered slot, so the booking pages must not be stale.
