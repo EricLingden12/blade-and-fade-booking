@@ -284,7 +284,13 @@ export interface Database {
       };
     };
     Views: Record<never, never>;
-    Functions: Record<never, never>;
+    Functions: {
+      /** True when the caller is on the `admin_users` allowlist. */
+      is_staff: {
+        Args: Record<never, never>;
+        Returns: boolean;
+      };
+    };
     Enums: {
       booking_status: BookingStatus;
     };

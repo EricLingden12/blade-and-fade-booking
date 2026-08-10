@@ -151,6 +151,16 @@ create index if not exists bookings_starts_idx
 create index if not exists bookings_status_starts_idx
   on public.bookings (status, starts_at);
 
+-- Who may use /admin. Adding a colleague is a deliberate SQL action: there is
+-- no insert privilege through the API, so a compromised admin session cannot
+-- quietly promote another account.
+create table if not exists public.admin_users (
+  user_id  uuid primary key references auth.users(id) on delete cascade,
+  email    text,
+  note     text,
+  added_at timestamptz not null default now()
+);
+
 -- Single-row shop configuration. The `id` check enforces "exactly one row", so
 -- reads never have to pick one and writes cannot fork the configuration.
 create table if not exists public.shop_settings (
@@ -393,6 +403,7 @@ alter table public.bookings       enable row level security;
 alter table public.shop_settings  enable row level security;
 alter table public.shop_hours     enable row level security;
 alter table public.shop_closures  enable row level security;
+alter table public.admin_users    enable row level security;
 
 revoke all on public.services       from anon, authenticated;
 revoke all on public.staff          from anon, authenticated;
@@ -403,6 +414,7 @@ revoke all on public.bookings       from anon, authenticated;
 revoke all on public.shop_settings  from anon, authenticated;
 revoke all on public.shop_hours     from anon, authenticated;
 revoke all on public.shop_closures  from anon, authenticated;
+revoke all on public.admin_users    from anon, authenticated;
 
 grant select on public.services to anon;
 grant select on public.staff    to anon;
@@ -424,6 +436,7 @@ grant select, update on public.shop_settings to authenticated;
 -- must stay complete. Closing a day is is_open = false, not a delete.
 grant select, update on public.shop_hours to authenticated;
 grant select, insert, update, delete on public.shop_closures to authenticated;
+grant select on public.admin_users to authenticated;
 
 -- The seed script and all server-side reads run as service_role. Granted
 -- explicitly rather than relying on Supabase's default privileges.
@@ -434,6 +447,41 @@ grant all on public.working_hours  to service_role;
 grant all on public.time_off       to service_role;
 grant all on public.bookings       to service_role;
 grant all on public.shop_settings  to service_role;
+
+-- ----------------------------------------------------------------------------
+-- Who counts as staff
+--
+-- Membership of `admin_users` — not merely holding a Supabase account — is what
+-- every staff policy below checks. Without this, "signed up" would equal "runs
+-- the barbershop", which is only safe while a dashboard checkbox stays ticked.
+--
+-- SECURITY DEFINER on purpose: a policy on `bookings` that selected from
+-- `admin_users` directly would need the caller to hold SELECT on it, and that
+-- table has its own RLS — which is how you get infinite recursion. Running the
+-- lookup as the owner sidesteps both. `search_path` is pinned so the body can't
+-- be redirected by a caller-controlled path.
+-- ----------------------------------------------------------------------------
+
+create or replace function public.is_staff()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select exists (
+    select 1 from public.admin_users where user_id = auth.uid()
+  );
+$$;
+
+revoke all on function public.is_staff() from public;
+grant execute on function public.is_staff() to authenticated, anon, service_role;
+
+drop policy if exists "Staff read the staff list" on public.admin_users;
+create policy "Staff read the staff list"
+  on public.admin_users for select
+  to authenticated
+  using (public.is_staff());
 
 -- --- services ---------------------------------------------------------------
 
@@ -447,8 +495,8 @@ drop policy if exists "Staff manage services" on public.services;
 create policy "Staff manage services"
   on public.services for all
   to authenticated
-  using (true)
-  with check (true);
+  using (public.is_staff())
+  with check (public.is_staff());
 
 -- --- staff ------------------------------------------------------------------
 
@@ -462,8 +510,8 @@ drop policy if exists "Staff manage barbers" on public.staff;
 create policy "Staff manage barbers"
   on public.staff for all
   to authenticated
-  using (true)
-  with check (true);
+  using (public.is_staff())
+  with check (public.is_staff());
 
 -- --- staff_services ---------------------------------------------------------
 -- Not public. The booking flow needs this mapping, but it is resolved
@@ -473,8 +521,8 @@ drop policy if exists "Staff manage service assignments" on public.staff_service
 create policy "Staff manage service assignments"
   on public.staff_services for all
   to authenticated
-  using (true)
-  with check (true);
+  using (public.is_staff())
+  with check (public.is_staff());
 
 -- --- working_hours ----------------------------------------------------------
 
@@ -482,8 +530,8 @@ drop policy if exists "Staff manage working hours" on public.working_hours;
 create policy "Staff manage working hours"
   on public.working_hours for all
   to authenticated
-  using (true)
-  with check (true);
+  using (public.is_staff())
+  with check (public.is_staff());
 
 -- --- time_off ---------------------------------------------------------------
 
@@ -491,8 +539,8 @@ drop policy if exists "Staff manage time off" on public.time_off;
 create policy "Staff manage time off"
   on public.time_off for all
   to authenticated
-  using (true)
-  with check (true);
+  using (public.is_staff())
+  with check (public.is_staff());
 
 -- --- bookings ---------------------------------------------------------------
 -- Deliberately no SELECT policy for anon: a customer cannot enumerate, guess at
@@ -525,8 +573,8 @@ drop policy if exists "Staff manage bookings" on public.bookings;
 create policy "Staff manage bookings"
   on public.bookings for all
   to authenticated
-  using (true)
-  with check (true);
+  using (public.is_staff())
+  with check (public.is_staff());
 
 -- --- shop_settings -----------------------------------------------------------
 
@@ -540,14 +588,47 @@ drop policy if exists "Staff read shop settings" on public.shop_settings;
 create policy "Staff read shop settings"
   on public.shop_settings for select
   to authenticated
-  using (true);
+  using (public.is_staff());
 
 drop policy if exists "Staff update shop settings" on public.shop_settings;
 create policy "Staff update shop settings"
   on public.shop_settings for update
   to authenticated
-  using (true)
-  with check (true);
+  using (public.is_staff())
+  with check (public.is_staff());
+
+
+drop policy if exists "Shop hours are public" on public.shop_hours;
+create policy "Shop hours are public"
+  on public.shop_hours for select
+  to anon
+  using (true);
+
+drop policy if exists "Staff read shop hours" on public.shop_hours;
+create policy "Staff read shop hours"
+  on public.shop_hours for select
+  to authenticated
+  using (public.is_staff());
+
+drop policy if exists "Staff update shop hours" on public.shop_hours;
+create policy "Staff update shop hours"
+  on public.shop_hours for update
+  to authenticated
+  using (public.is_staff())
+  with check (public.is_staff());
+
+drop policy if exists "Shop closures are public" on public.shop_closures;
+create policy "Shop closures are public"
+  on public.shop_closures for select
+  to anon
+  using (true);
+
+drop policy if exists "Staff manage shop closures" on public.shop_closures;
+create policy "Staff manage shop closures"
+  on public.shop_closures for all
+  to authenticated
+  using (public.is_staff())
+  with check (public.is_staff());
 
 -- ----------------------------------------------------------------------------
 -- Done. Next: `npm run seed`.
