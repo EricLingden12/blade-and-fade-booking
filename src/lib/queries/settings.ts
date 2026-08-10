@@ -41,35 +41,54 @@ const FALLBACK: ShopSettings = {
 export const getShopSettings = cache(async (): Promise<ShopSettings> => {
   try {
     const supabase = await createClient();
-    const { data } = await supabase
+    // `*`, not a column list, on purpose. Naming a column that a migration
+    // hasn't added yet makes PostgREST reject the whole query (42703), and this
+    // function's fallback would then quietly revert the currency, the address
+    // and the map pin to compiled-in defaults across the entire site. With `*`
+    // a missing column simply isn't in the response, and only the feature that
+    // needs it degrades.
+    const { data, error } = await supabase
       .from("shop_settings")
-      .select(
-        "currency_code, address_lines, latitude, longitude, map_url, directions_note, deposit_enabled, deposit_amount",
-      )
+      .select("*")
       .maybeSingle();
 
+    if (error) {
+      // Loud on purpose. The previous version failed silently, so a missing
+      // migration looked like "the currency setting doesn't work".
+      console.error(
+        "[settings] shop_settings read failed — falling back to defaults:",
+        error.message,
+      );
+      return FALLBACK;
+    }
     if (!data) return FALLBACK;
+
+    // `select("*")` is typed to the current schema, but the row genuinely may
+    // be missing columns on a database that predates a migration.
+    const row = data as Partial<typeof data>;
 
     // A settings row with an empty address array would render a blank footer,
     // which is worse than showing the compiled-in address.
-    const addressLines = data.address_lines?.filter(Boolean) ?? [];
+    const addressLines = row.address_lines?.filter(Boolean) ?? [];
 
     return {
-      currency: data.currency_code ?? DEFAULT_CURRENCY,
+      currency: row.currency_code ?? DEFAULT_CURRENCY,
       location: {
         addressLines: addressLines.length
           ? addressLines
           : DEFAULT_LOCATION.addressLines,
         // numeric arrives as a JSON number, but coerce anyway: a driver that
         // hands back a string would otherwise reach the map URL builders.
-        latitude: toCoordinate(data.latitude),
-        longitude: toCoordinate(data.longitude),
-        mapUrl: data.map_url ?? null,
-        directionsNote: data.directions_note ?? null,
+        latitude: toCoordinate(row.latitude ?? null),
+        longitude: toCoordinate(row.longitude ?? null),
+        mapUrl: row.map_url ?? null,
+        directionsNote: row.directions_note ?? null,
       },
+      // These two arrive only once migration 0005 has run. Absent means "no
+      // deposit", which is the safe direction: never charge by accident.
       deposit: {
-        enabled: Boolean(data.deposit_enabled),
-        amount: Number(data.deposit_amount ?? 0),
+        enabled: Boolean(row.deposit_enabled),
+        amount: Number(row.deposit_amount ?? 0),
       },
     };
   } catch {

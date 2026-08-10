@@ -58,9 +58,10 @@ type JoinedRow = {
   starts_at: string;
   ends_at: string;
   status: BookingStatus;
-  payment_status: PaymentStatus;
-  deposit_amount: number | null;
-  deposit_currency: string | null;
+  // Present only once migration 0005 has run.
+  payment_status?: PaymentStatus;
+  deposit_amount?: number | null;
+  deposit_currency?: string | null;
   customer_name: string;
   customer_email: string;
   customer_phone: string;
@@ -73,9 +74,7 @@ type JoinedRow = {
 };
 
 const JOINED_SELECT = `
-  id, reference_code, starts_at, ends_at, status,
-  payment_status, deposit_amount, deposit_currency,
-  customer_name, customer_email, customer_phone, notes, created_at,
+  *, created_at,
   service_id, staff_id,
   services:service_id ( name, price, duration_minutes ),
   staff:staff_id ( name, avatar_url )
@@ -88,10 +87,10 @@ function toAdminBooking(row: JoinedRow): AdminBooking {
     startsAt: row.starts_at,
     endsAt: row.ends_at,
     status: row.status,
-    paymentStatus: row.payment_status,
+    paymentStatus: row.payment_status ?? "not_required",
     depositAmount:
-      row.deposit_amount === null ? null : Number(row.deposit_amount),
-    depositCurrency: row.deposit_currency,
+      row.deposit_amount == null ? null : Number(row.deposit_amount),
+    depositCurrency: row.deposit_currency ?? null,
     customerName: row.customer_name,
     customerEmail: row.customer_email,
     customerPhone: row.customer_phone,
