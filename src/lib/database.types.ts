@@ -5,6 +5,13 @@
  *   npx supabase gen types typescript --project-id <ref> > src/lib/database.types.ts
  */
 
+export type PaymentStatus =
+  | "not_required"
+  | "pending"
+  | "paid"
+  | "refunded"
+  | "failed";
+
 export type BookingStatus =
   | "pending"
   | "confirmed"
@@ -162,6 +169,8 @@ export interface Database {
           longitude: number | null;
           map_url: string | null;
           directions_note: string | null;
+          deposit_enabled: boolean;
+          deposit_amount: number;
           updated_at: string;
         };
         Insert: {
@@ -172,6 +181,8 @@ export interface Database {
           longitude?: number | null;
           map_url?: string | null;
           directions_note?: string | null;
+          deposit_enabled?: boolean;
+          deposit_amount?: number;
           updated_at?: string;
         };
         Update: {
@@ -182,6 +193,8 @@ export interface Database {
           longitude?: number | null;
           map_url?: string | null;
           directions_note?: string | null;
+          deposit_enabled?: boolean;
+          deposit_amount?: number;
           updated_at?: string;
         };
         Relationships: [];
@@ -247,6 +260,12 @@ export interface Database {
           status: BookingStatus;
           notes: string | null;
           reference_code: string;
+          payment_status: PaymentStatus;
+          deposit_amount: number | null;
+          deposit_currency: string | null;
+          stripe_session_id: string | null;
+          stripe_payment_intent: string | null;
+          hold_expires_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -262,6 +281,12 @@ export interface Database {
           status?: BookingStatus;
           notes?: string | null;
           reference_code?: string;
+          payment_status?: PaymentStatus;
+          deposit_amount?: number | null;
+          deposit_currency?: string | null;
+          stripe_session_id?: string | null;
+          stripe_payment_intent?: string | null;
+          hold_expires_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -277,6 +302,12 @@ export interface Database {
           status?: BookingStatus;
           notes?: string | null;
           reference_code?: string;
+          payment_status?: PaymentStatus;
+          deposit_amount?: number | null;
+          deposit_currency?: string | null;
+          stripe_session_id?: string | null;
+          stripe_payment_intent?: string | null;
+          hold_expires_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -290,9 +321,15 @@ export interface Database {
         Args: Record<never, never>;
         Returns: boolean;
       };
+      /** Cancels pending bookings whose payment window lapsed. Returns the count. */
+      release_expired_holds: {
+        Args: Record<never, never>;
+        Returns: number;
+      };
     };
     Enums: {
       booking_status: BookingStatus;
+      payment_status: PaymentStatus;
     };
     CompositeTypes: Record<never, never>;
   };

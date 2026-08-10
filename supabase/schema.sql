@@ -34,6 +34,16 @@ begin
       'no_show'
     );
   end if;
+
+  if not exists (select 1 from pg_type where typname = 'payment_status') then
+    create type public.payment_status as enum (
+      'not_required',  -- deposits were off when this was booked
+      'pending',       -- checkout started, money not yet confirmed
+      'paid',
+      'refunded',
+      'failed'
+    );
+  end if;
 end
 $$;
 
@@ -130,6 +140,18 @@ create table if not exists public.bookings (
   status         public.booking_status not null default 'confirmed',
   notes          text,
   reference_code text not null,
+
+  -- Payment. A booking exists before its money does: with deposits on, the row
+  -- is inserted as 'pending' so the exclusion constraint reserves the slot
+  -- while the customer is at the checkout, and hold_expires_at releases it if
+  -- they never finish.
+  payment_status        public.payment_status not null default 'not_required',
+  deposit_amount        numeric(10, 2),
+  deposit_currency      text,
+  stripe_session_id     text,
+  stripe_payment_intent text,
+  hold_expires_at       timestamptz,
+
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now(),
 
@@ -137,7 +159,10 @@ create table if not exists public.bookings (
   constraint bookings_name_not_blank check (length(btrim(customer_name)) > 0),
   constraint bookings_email_shape check (customer_email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'),
   constraint bookings_phone_not_blank check (length(btrim(customer_phone)) >= 7),
-  constraint bookings_reference_unique unique (reference_code)
+  constraint bookings_reference_unique unique (reference_code),
+  constraint bookings_deposit_currency_shape check (
+    deposit_currency is null or deposit_currency ~ '^[A-Z]{3}$'
+  )
 );
 
 comment on table public.bookings is 'Customer details live on the row — there are no customer accounts.';
@@ -150,6 +175,16 @@ create index if not exists bookings_starts_idx
 
 create index if not exists bookings_status_starts_idx
   on public.bookings (status, starts_at);
+
+-- A duplicate session id means a replayed webhook or two colliding checkouts;
+-- the database should refuse rather than let the app guess.
+create unique index if not exists bookings_stripe_session_idx
+  on public.bookings (stripe_session_id)
+  where stripe_session_id is not null;
+
+create index if not exists bookings_hold_expiry_idx
+  on public.bookings (hold_expires_at)
+  where hold_expires_at is not null;
 
 -- Who may use /admin. Adding a colleague is a deliberate SQL action: there is
 -- no insert privilege through the API, so a compromised admin session cannot
@@ -178,6 +213,11 @@ create table if not exists public.shop_settings (
   -- The things a pin can't say: "above the pharmacy", "parking round the back".
   directions_note text,
 
+  -- Deposit taken at booking to hold the chair. Denominated in currency_code,
+  -- like every other price here. The balance is paid in the shop.
+  deposit_enabled boolean not null default false,
+  deposit_amount  numeric(10, 2) not null default 0,
+
   updated_at      timestamptz not null default now(),
 
   constraint shop_settings_singleton check (id),
@@ -203,6 +243,14 @@ create table if not exists public.shop_settings (
   -- Keeps `javascript:` and friends out of an href we render.
   constraint shop_settings_map_url_shape check (
     map_url is null or map_url ~ '^https?://'
+  ),
+  constraint shop_settings_deposit_amount_sane check (
+    deposit_amount >= 0 and deposit_amount < 100000
+  ),
+  -- A deposit of nothing is not a deposit. Enforcing the pair here keeps the
+  -- app from ever asking Stripe to charge zero.
+  constraint shop_settings_deposit_enabled_needs_amount check (
+    not deposit_enabled or deposit_amount > 0
   )
 );
 
@@ -555,6 +603,8 @@ create policy "Anyone may request a booking"
   with check (
     -- A public request can never arrive pre-approved or backdated.
     status in ('pending', 'confirmed')
+    -- …nor claim its money is already settled.
+    and payment_status in ('not_required', 'pending')
     and starts_at > now()
     and ends_at > starts_at
     -- Guard against a client claiming an absurd duration.
@@ -629,6 +679,44 @@ create policy "Staff manage shop closures"
   to authenticated
   using (public.is_staff())
   with check (public.is_staff());
+
+-- ----------------------------------------------------------------------------
+-- Releasing abandoned holds
+--
+-- Called from the app before availability is computed, so a slot whose payment
+-- was never completed returns to sale without waiting for a scheduled job.
+-- SECURITY DEFINER because anon triggers it indirectly and must not hold
+-- update rights on bookings.
+-- ----------------------------------------------------------------------------
+
+create or replace function public.release_expired_holds()
+returns integer
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  released integer;
+begin
+  update public.bookings
+     set status = 'cancelled',
+         payment_status = case
+           when payment_status = 'pending' then 'failed'
+           else payment_status
+         end,
+         hold_expires_at = null
+   where status = 'pending'
+     and hold_expires_at is not null
+     and hold_expires_at < now();
+
+  get diagnostics released = row_count;
+  return released;
+end;
+$$;
+
+revoke all on function public.release_expired_holds() from public;
+grant execute on function public.release_expired_holds()
+  to anon, authenticated, service_role;
 
 -- ----------------------------------------------------------------------------
 -- Done. Next: `npm run seed`.

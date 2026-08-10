@@ -9,7 +9,7 @@ import {
   getActiveStaff,
   getServiceStaffMap,
 } from "@/lib/queries/public";
-import { getCurrency } from "@/lib/queries/settings";
+import { depositRequired, getCurrency } from "@/lib/queries/settings";
 import { SHOP } from "@/lib/shop";
 
 export const metadata: Metadata = {
@@ -19,13 +19,15 @@ export const metadata: Metadata = {
 };
 
 export default async function BookPage(props: PageProps<"/book">) {
-  const [searchParams, services, staff, serviceStaff, currency] = await Promise.all([
-    props.searchParams,
-    getActiveServices(),
-    getActiveStaff(),
-    getServiceStaffMap(),
-    getCurrency(),
-  ]);
+  const [searchParams, services, staff, serviceStaff, currency, deposit] =
+    await Promise.all([
+      props.searchParams,
+      getActiveServices(),
+      getActiveStaff(),
+      getServiceStaffMap(),
+      getCurrency(),
+      depositRequired(),
+    ]);
 
   if (services.length === 0 || staff.length === 0) {
     return <BookingUnavailable />;
@@ -48,6 +50,7 @@ export default async function BookPage(props: PageProps<"/book">) {
       staff={staff}
       serviceStaff={serviceStaff}
       currency={currency}
+      deposit={deposit.required ? { amount: deposit.amount } : null}
       initialServiceId={initialServiceId}
       // Only honour a pinned barber if they actually offer the pinned service.
       initialStaffId={

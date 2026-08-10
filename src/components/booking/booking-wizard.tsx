@@ -33,10 +33,13 @@ export function BookingWizard({
   initialServiceId,
   initialStaffId,
   currency,
+  deposit,
 }: {
   services: Service[];
   staff: Staff[];
   serviceStaff: Record<string, string[]>;
+  /** Null when no deposit is taken — the flow then behaves as it always did. */
+  deposit: { amount: number } | null;
   initialServiceId: string | null;
   initialStaffId: string | null;
   currency: string;
@@ -136,6 +139,13 @@ export function BookingWizard({
       });
 
       if (result.ok) {
+        // A deposit booking isn't finished here — the slot is only held. Hand
+        // the customer to Stripe with a full page navigation rather than the
+        // router, which can't leave the app.
+        if ("checkoutUrl" in result) {
+          window.location.assign(result.checkoutUrl);
+          return;
+        }
         router.push(`/book/confirmation?ref=${result.referenceCode}`);
         return;
       }
@@ -312,6 +322,7 @@ export function BookingWizard({
               service={service}
               barberName={barber?.name ?? "Any available barber"}
               currency={currency}
+              deposit={deposit}
               startsAt={startsAt}
               draft={draft}
               onEdit={(target) => setStep(target)}
@@ -363,8 +374,10 @@ export function BookingWizard({
               {submitting ? (
                 <>
                   <Loader2 className="size-4 animate-spin" />
-                  Booking…
+                  {deposit ? "Opening payment…" : "Booking…"}
                 </>
+              ) : deposit ? (
+                `Pay ${formatMoney(deposit.amount, currency)} deposit`
               ) : (
                 "Confirm booking"
               )}
@@ -374,7 +387,10 @@ export function BookingWizard({
       </div>
 
       <p className="mt-4 text-center text-xs text-ink-600 sm:text-left">
-        {STEP_LABELS[step]} · No payment now — you settle up at the shop.
+        {STEP_LABELS[step]}
+        {deposit
+          ? ` · ${formatMoney(deposit.amount, currency)} deposit now, the rest at the shop.`
+          : " · No payment now — you settle up at the shop."}
       </p>
     </div>
   );
@@ -386,6 +402,7 @@ function Review({
   startsAt,
   draft,
   currency,
+  deposit,
   onEdit,
 }: {
   service: Service;
@@ -393,6 +410,7 @@ function Review({
   startsAt: string;
   draft: DetailsDraft;
   currency: string;
+  deposit: { amount: number } | null;
   onEdit: (step: Step) => void;
 }) {
   const endsAt = new Date(
@@ -456,12 +474,46 @@ function Review({
           </div>
         ))}
 
-        <div className="flex items-center justify-between gap-4 bg-ink-800 px-5 py-4">
-          <dt className="text-sm font-medium text-ink-200">Total due at shop</dt>
-          <dd className="font-display text-xl font-semibold tabular-nums text-brand-400">
-            {formatMoney(service.price, currency)}
-          </dd>
-        </div>
+        {deposit ? (
+          <>
+            {/* Two numbers, stated plainly. The commonest complaint about
+                deposits is people not realising it comes off the bill. */}
+            <div className="flex items-center justify-between gap-4 bg-ink-800 px-5 py-3.5">
+              <dt className="text-sm font-medium text-ink-200">
+                Deposit now
+                <span className="ml-2 text-xs font-normal text-ink-400">
+                  to hold your chair
+                </span>
+              </dt>
+              <dd className="font-display text-xl font-semibold tabular-nums text-brand-400">
+                {formatMoney(deposit.amount, currency)}
+              </dd>
+            </div>
+            <div className="flex items-center justify-between gap-4 border-t border-white/5 bg-ink-800 px-5 py-3.5">
+              <dt className="text-sm text-ink-300">
+                Balance at the shop
+                <span className="ml-2 text-xs text-ink-500">
+                  {formatMoney(service.price, currency)} total, less the deposit
+                </span>
+              </dt>
+              <dd className="font-display text-lg font-semibold tabular-nums text-ink-100">
+                {formatMoney(
+                  Math.max(service.price - deposit.amount, 0),
+                  currency,
+                )}
+              </dd>
+            </div>
+          </>
+        ) : (
+          <div className="flex items-center justify-between gap-4 bg-ink-800 px-5 py-4">
+            <dt className="text-sm font-medium text-ink-200">
+              Total due at shop
+            </dt>
+            <dd className="font-display text-xl font-semibold tabular-nums text-brand-400">
+              {formatMoney(service.price, currency)}
+            </dd>
+          </div>
+        )}
       </dl>
     </div>
   );

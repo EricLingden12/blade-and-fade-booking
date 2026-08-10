@@ -46,6 +46,57 @@ export async function updateCurrencyAction(
 }
 
 /* -------------------------------------------------------------------------- */
+/* Deposits                                                                   */
+/* -------------------------------------------------------------------------- */
+
+const depositSchema = z
+  .object({
+    enabled: z.boolean(),
+    amount: z
+      .number()
+      .nonnegative("A deposit can't be negative")
+      .max(99999, "That deposit is too large"),
+  })
+  .refine((value) => !value.enabled || value.amount > 0, {
+    message: "Set an amount, or switch deposits off",
+    path: ["amount"],
+  });
+
+export async function updateDepositAction(input: {
+  enabled: boolean;
+  amount: number;
+}): Promise<ActionResult> {
+  const parsed = depositSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid." };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("shop_settings")
+    .update({
+      deposit_enabled: parsed.data.enabled,
+      deposit_amount: parsed.data.amount,
+    })
+    .eq("id", true);
+
+  if (error) {
+    console.error("[admin] updateDeposit:", error.message);
+    return { ok: false, message: "Couldn't save the deposit setting." };
+  }
+
+  // The deposit shows on the booking wizard and the review step.
+  revalidatePath("/", "layout");
+
+  return {
+    ok: true,
+    message: parsed.data.enabled
+      ? "Deposits are on. New bookings will ask for payment."
+      : "Deposits are off. Bookings confirm straight away.",
+  };
+}
+
+/* -------------------------------------------------------------------------- */
 /* Location                                                                   */
 /* -------------------------------------------------------------------------- */
 

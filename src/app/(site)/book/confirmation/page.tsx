@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { CalendarPlus, Check, Phone } from "lucide-react";
+import { CalendarPlus, Check, Loader2, Phone } from "lucide-react";
 
 import { BookingCard } from "@/components/booking/booking-card";
 import { CopyReference } from "@/components/booking/copy-reference";
@@ -43,6 +43,13 @@ export default async function ConfirmationPage(
     getCurrency(),
   ]);
   if (!booking) redirect(`/booking/${encodeURIComponent(reference)}`);
+
+  // Stripe sends the customer back here the instant they pay, but the booking
+  // is confirmed by the webhook, which may be a second or two behind. Showing
+  // "You're booked" before that would be a promise we haven't kept yet.
+  if (booking.status === "pending" && booking.paymentStatus === "pending") {
+    return <AwaitingPayment reference={booking.referenceCode} />;
+  }
 
   return (
     <div className="mx-auto w-full max-w-xl px-5 py-14 sm:px-8 sm:py-20">
@@ -101,6 +108,48 @@ export default async function ConfirmationPage(
           Back to {SHOP.name}
         </Link>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Paid, but not yet confirmed.
+ *
+ * The page refreshes itself rather than polling with JavaScript — the webhook
+ * normally lands within a second or two, and a meta refresh needs no client
+ * bundle to do the job. The chair is already held either way.
+ */
+function AwaitingPayment({ reference }: { reference: string }) {
+  return (
+    <div className="mx-auto w-full max-w-md px-5 py-20 text-center sm:px-8 sm:py-28">
+      <meta httpEquiv="refresh" content="4" />
+
+      <span className="mx-auto flex size-14 items-center justify-center rounded-full bg-white/5 ring-1 ring-white/10">
+        <Loader2 className="size-6 animate-spin text-brand-400" aria-hidden />
+      </span>
+
+      <h1 className="mt-6 font-display text-3xl font-bold uppercase leading-none tracking-tight text-ink-50">
+        Confirming your payment
+      </h1>
+      <p className="mt-4 text-sm leading-relaxed text-ink-300">
+        Your chair is held. This page will update on its own — no need to pay
+        again or go back.
+      </p>
+
+      <p className="mt-6 font-mono text-sm tracking-widest text-ink-400">
+        {reference}
+      </p>
+
+      <p className="mt-8 text-xs leading-relaxed text-ink-500">
+        Still here after a minute? Check{" "}
+        <Link
+          href={`/booking/${reference}`}
+          className="text-brand-400 underline-offset-4 hover:underline"
+        >
+          your booking
+        </Link>{" "}
+        or give us a ring on {SHOP.phone}.
+      </p>
     </div>
   );
 }

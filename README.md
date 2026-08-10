@@ -35,9 +35,18 @@ else. The numbered files in [`supabase/migrations/`](supabase/migrations) exist
 only for a database created before a given feature: run the ones you're missing,
 in order. Each is idempotent too.
 
-**2. Turn off public sign-ups.** Supabase → Authentication → Providers → Email →
-disable *Allow new users to sign up*. The admin policies treat "authenticated"
-as "staff", so this is what stops anyone signing themselves into your dashboard.
+**2. Put yourself on the staff list.** Admin access is not "has an account" — it
+is membership of `admin_users`, which every staff policy checks through
+`is_staff()`. After creating your user (step 3 does this):
+
+```sql
+insert into public.admin_users (user_id, email)
+select id, email from auth.users where email = 'you@example.com';
+```
+
+Turning off public sign-ups (Supabase → Authentication → Providers → Email) is
+still worth doing, but it is no longer what protects the dashboard: someone who
+registers gets an account that can read nothing and change nothing.
 
 **3. Seed it.**
 
@@ -118,7 +127,7 @@ barber is free, and never anyone else's booking.
 
 ### Verification
 
-`npm run check` drives the pure logic directly — 94 assertions across four
+`npm run check` drives the pure logic directly — 126 assertions across five
 suites, no database and no network:
 
 | Suite | Covers |
@@ -126,6 +135,7 @@ suites, no database and no network:
 | `tz` | UTC↔Dubai conversion, day rollover, day-key round trips |
 | `availability` | the 15-minute grid, turnover buffer, lead time, leave, split shifts, the "any barber" union |
 | `hours` | shop opening hours, calendar closures, and clamping a barber's shift to them |
+| `money` | converting prices to the integer minor units a payment processor takes |
 | `location` | parsing pasted map links into coordinates, and building map/directions URLs |
 
 The timezone half passes with the *server* clock set to Los Angeles, Kiritimati,
@@ -170,11 +180,17 @@ next free one — a race only fails the customer when the slot is genuinely gone
 Two audiences, defined explicitly in `schema.sql` (grants are revoked first
 rather than inherited from Supabase's permissive defaults):
 
-| | anon | authenticated |
+| | anon | staff |
 | --- | --- | --- |
 | `services`, `staff` | `SELECT` where active | full |
 | `staff_services`, `working_hours`, `time_off` | — | full |
 | `bookings` | `INSERT` only | full |
+| `shop_settings`, `shop_hours`, `shop_closures` | `SELECT` | manage |
+
+"staff" means *on the `admin_users` allowlist*, not merely authenticated. Every
+staff policy calls `is_staff()`; a stranger who signs up gets an account that
+sees nothing. Nobody can write to `admin_users` through the API, so adding a
+colleague is a deliberate SQL insert and a stolen session cannot promote itself.
 
 **anon has no `SELECT` policy on bookings at all.** A customer cannot read back
 any booking, including their own. The confirmation screen and the
@@ -209,6 +225,7 @@ src/
     shop.ts            booking rules and fixed shop details
     money.ts           currency list and price formatting
     location.ts        map-link parsing and directions URLs
+    stripe.ts          payment client; absent keys mean no payment step
     queries/           server-side reads, split by audience
     supabase/          browser / server / service-role clients
 supabase/
@@ -218,6 +235,26 @@ scripts/
   seed.ts              demo data
   __checks__/          the four verification suites
 ```
+
+### Deposits
+
+Optional, and off unless two separate things are true: the shop has switched
+them on with an amount in `/admin/settings`, *and* the deployment has Stripe
+keys. A clone with no keys takes bookings exactly as it did before deposits
+existed, rather than failing on the last step of the wizard.
+
+The interesting part is the hold. A booking now exists before its money does:
+the row is inserted as `pending` the moment checkout starts, so the same
+exclusion constraint that prevents double-booking also reserves the slot while
+the customer types their card details. `hold_expires_at` gives it back if they
+wander off, and only the Stripe webhook — never the browser's return trip to
+the success URL — confirms the booking.
+
+The hold is 30 minutes because that is Stripe's minimum checkout-session
+lifetime. A shorter hold would leave a window where a session is still payable
+after the slot has been given away; the webhook handles that case by reinstating
+the booking if the slot is somehow still free and refunding automatically if it
+isn't, but the better fix is not to open the window.
 
 ### What the owner can change without a deploy
 

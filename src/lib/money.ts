@@ -93,3 +93,66 @@ export function currencySymbol(currency: string): string {
 export function currencyLabel(code: string): string {
   return CURRENCIES.find((item) => item.code === code)?.label ?? code;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Charging                                                                   */
+/*                                                                            */
+/* Payment processors take integers in a currency's smallest unit, and the     */
+/* number of those units per whole differs by currency. Getting this wrong is  */
+/* not a rounding bug — it charges someone 100× or 1/100× the right amount.    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Currencies with no minor unit at all: ¥1500 is charged as 1500, not 150000.
+ * This is Stripe's published list, not a guess.
+ */
+const ZERO_DECIMAL = new Set([
+  "BIF", "CLP", "DJF", "GNF", "JPY", "KMF", "KRW", "MGA",
+  "PYG", "RWF", "UGX", "VND", "VUV", "XAF", "XOF", "XPF",
+]);
+
+/**
+ * Currencies with three decimal places. Stripe requires these amounts to be a
+ * multiple of 10 — it rounds to the nearest hundredth internally — so 1.234
+ * has to be sent as 1240, not 1234.
+ */
+const THREE_DECIMAL = new Set(["BHD", "JOD", "KWD", "OMR", "TND"]);
+
+/** How many minor units make one whole unit of this currency. */
+export function minorUnitsPerWhole(currency: string): number {
+  const code = currency.toUpperCase();
+  if (ZERO_DECIMAL.has(code)) return 1;
+  if (THREE_DECIMAL.has(code)) return 1000;
+  return 100;
+}
+
+/** Decimal places a currency actually uses, for input steps and validation. */
+export function currencyDecimals(currency: string): number {
+  const code = currency.toUpperCase();
+  if (ZERO_DECIMAL.has(code)) return 0;
+  if (THREE_DECIMAL.has(code)) return 3;
+  return 2;
+}
+
+/**
+ * A displayed price to the integer a payment processor expects.
+ *
+ * Rounds rather than truncates, so 0.1 + 0.2 style float noise can't shave a
+ * unit off the charge. Three-decimal currencies are snapped to the multiple of
+ * 10 Stripe insists on.
+ */
+export function toMinorUnits(amount: number, currency: string): number {
+  const code = currency.toUpperCase();
+  const factor = minorUnitsPerWhole(code);
+  const minor = Math.round(amount * factor);
+
+  // Stripe rejects three-decimal amounts that aren't a multiple of 10.
+  if (THREE_DECIMAL.has(code)) return Math.round(minor / 10) * 10;
+
+  return minor;
+}
+
+/** The inverse, for showing back what was actually charged. */
+export function fromMinorUnits(minor: number, currency: string): number {
+  return minor / minorUnitsPerWhole(currency);
+}

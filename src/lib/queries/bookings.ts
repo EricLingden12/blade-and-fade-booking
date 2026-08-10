@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { BookingStatus } from "@/lib/database.types";
+import type { BookingStatus, PaymentStatus } from "@/lib/database.types";
 import { createAdminClient } from "@/lib/supabase/server";
 
 /** A booking joined with the names a customer actually cares about. */
@@ -10,6 +10,9 @@ export type BookingDetail = {
   startsAt: string;
   endsAt: string;
   status: BookingStatus;
+  paymentStatus: PaymentStatus;
+  depositAmount: number | null;
+  depositCurrency: string | null;
   customerName: string;
   customerEmail: string;
   customerPhone: string;
@@ -29,6 +32,9 @@ type JoinedRow = {
   starts_at: string;
   ends_at: string;
   status: BookingStatus;
+  payment_status: PaymentStatus;
+  deposit_amount: number | null;
+  deposit_currency: string | null;
   customer_name: string;
   customer_email: string;
   customer_phone: string;
@@ -39,6 +45,7 @@ type JoinedRow = {
 
 const JOINED_SELECT = `
   id, reference_code, starts_at, ends_at, status,
+  payment_status, deposit_amount, deposit_currency,
   customer_name, customer_email, customer_phone, notes,
   services:service_id ( name, price, duration_minutes ),
   staff:staff_id ( name, avatar_url )
@@ -51,6 +58,9 @@ function toDetail(row: JoinedRow): BookingDetail {
     startsAt: row.starts_at,
     endsAt: row.ends_at,
     status: row.status,
+    paymentStatus: row.payment_status,
+    depositAmount: row.deposit_amount === null ? null : Number(row.deposit_amount),
+    depositCurrency: row.deposit_currency,
     customerName: row.customer_name,
     customerEmail: row.customer_email,
     customerPhone: row.customer_phone,

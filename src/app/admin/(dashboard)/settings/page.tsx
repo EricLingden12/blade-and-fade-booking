@@ -1,15 +1,17 @@
 import type { Metadata } from "next";
 
 import { CurrencyPicker } from "@/components/admin/currency-picker";
+import { DepositEditor } from "@/components/admin/deposit-editor";
 import { LocationEditor } from "@/components/admin/location-editor";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getShopSettings } from "@/lib/queries/settings";
 import { SHOP_TIMEZONE } from "@/lib/shop";
+import { stripeMode } from "@/lib/stripe";
 
 export const metadata: Metadata = { title: "Settings" };
 
 export default async function AdminSettingsPage() {
-  const { currency, location } = await getShopSettings();
+  const { currency, location, deposit } = await getShopSettings();
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6">
@@ -28,6 +30,20 @@ export default async function AdminSettingsPage() {
         </CardHeader>
         <CardContent>
           <CurrencyPicker current={currency} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Deposits</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <DepositEditor
+            enabled={deposit.enabled}
+            amount={deposit.amount}
+            currency={currency}
+            stripeMode={stripeMode()}
+          />
         </CardContent>
       </Card>
 

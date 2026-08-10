@@ -9,6 +9,7 @@ import { StatusBadge } from "@/components/admin/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getBooking } from "@/lib/queries/admin";
+import type { PaymentStatus } from "@/lib/database.types";
 import { formatMoney } from "@/lib/money";
 import { getCurrency } from "@/lib/queries/settings";
 import {
@@ -71,6 +72,16 @@ export default async function AdminBookingDetailPage(
                 {formatMoney(booking.servicePrice, currency)}
               </span>
             </Row>
+            {booking.paymentStatus !== "not_required" && (
+              <Row label="Deposit">
+                <PaymentLine
+                  status={booking.paymentStatus}
+                  amount={booking.depositAmount}
+                  currency={booking.depositCurrency ?? currency}
+                  servicePrice={booking.servicePrice}
+                />
+              </Row>
+            )}
             <Row label="Barber">
               <span className="flex items-center gap-2">
                 {booking.staffAvatarUrl && (
@@ -146,5 +157,50 @@ function Row({
       <span className="w-20 shrink-0 text-muted-foreground">{label}</span>
       <span className="min-w-0 flex-1 font-medium">{children}</span>
     </div>
+  );
+}
+
+/**
+ * What was asked for, whether it arrived, and what's still owed in the chair.
+ *
+ * The balance matters more than the deposit here: it's the number the barber
+ * reads out at the till.
+ */
+function PaymentLine({
+  status,
+  amount,
+  currency,
+  servicePrice,
+}: {
+  status: PaymentStatus;
+  amount: number | null;
+  currency: string;
+  servicePrice: number;
+}) {
+  const paid = amount ?? 0;
+  const balance = Math.max(servicePrice - paid, 0);
+
+  const described: Record<PaymentStatus, { label: string; tone: string }> = {
+    not_required: { label: "Not required", tone: "text-muted-foreground" },
+    pending: { label: "Awaiting payment", tone: "text-amber-600 dark:text-amber-500" },
+    paid: { label: "Paid", tone: "text-emerald-600 dark:text-emerald-500" },
+    refunded: { label: "Refunded", tone: "text-muted-foreground" },
+    failed: { label: "Payment failed", tone: "text-destructive" },
+  };
+
+  const { label, tone } = described[status];
+
+  return (
+    <>
+      <span className={tone}>{label}</span>
+      {amount !== null && (
+        <span className="block text-muted-foreground">
+          {formatMoney(paid, currency)} deposit
+          {status === "paid" && (
+            <> · {formatMoney(balance, currency)} due in the shop</>
+          )}
+        </span>
+      )}
+    </>
   );
 }
