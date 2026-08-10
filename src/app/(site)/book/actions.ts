@@ -3,6 +3,7 @@
 import {
   getBookingCalendar,
   getDayAvailability,
+  getDaySlotGrid,
   pickLeastBusyStaff,
   type BookingCalendar,
 } from "@/lib/availability";
@@ -23,13 +24,26 @@ import {
 /** Postgres exclusion-constraint violation — the double-booking guard firing. */
 const EXCLUSION_VIOLATION = "23P01";
 
+export type PublicSlot = {
+  startsAt: string;
+  endsAt: string;
+  state: "available" | "booked" | "past";
+};
+
 export type SlotsResult =
-  | { ok: true; slots: Array<{ startsAt: string; endsAt: string }> }
+  | { ok: true; slots: PublicSlot[] }
   | { ok: false; message: string };
 
 /**
- * Availability for one day. The browser never sees which barber is free for a
- * slot — only that the slot exists — so nothing here leaks the shop's book.
+ * Every time on the day, labelled available, booked or past.
+ *
+ * Showing booked times is a deliberate choice: an empty list reads as "the shop
+ * is shut", whereas a greyed-out 3pm reads as "someone got there first", which
+ * is both truer and more useful. It does reveal how busy the shop is, which is
+ * normal for a booking site.
+ *
+ * `staffIds` is stripped here and never crosses the wire. Which chair is free
+ * stays the shop's business — the browser only learns that a time is taken.
  */
 export async function fetchSlotsAction(input: {
   serviceId: string;
@@ -42,10 +56,18 @@ export async function fetchSlotsAction(input: {
   }
 
   try {
-    const slots = await getDayAvailability(parsed.data);
+    // Free any slot whose payment was abandoned before we report the day, so a
+    // dead hold isn't shown as booked.
+    await releaseExpiredHolds();
+
+    const slots = await getDaySlotGrid(parsed.data);
     return {
       ok: true,
-      slots: slots.map(({ startsAt, endsAt }) => ({ startsAt, endsAt })),
+      slots: slots.map(({ startsAt, endsAt, state }) => ({
+        startsAt,
+        endsAt,
+        state,
+      })),
     };
   } catch (error) {
     console.error("[book] fetchSlots:", error);

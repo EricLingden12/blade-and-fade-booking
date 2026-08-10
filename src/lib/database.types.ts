@@ -171,6 +171,10 @@ export interface Database {
           directions_note: string | null;
           deposit_enabled: boolean;
           deposit_amount: number;
+          turnaround_minutes: number;
+          slot_interval_minutes: number;
+          lead_time_minutes: number;
+          max_advance_days: number;
           updated_at: string;
         };
         Insert: {
@@ -183,6 +187,10 @@ export interface Database {
           directions_note?: string | null;
           deposit_enabled?: boolean;
           deposit_amount?: number;
+          turnaround_minutes?: number;
+          slot_interval_minutes?: number;
+          lead_time_minutes?: number;
+          max_advance_days?: number;
           updated_at?: string;
         };
         Update: {
@@ -195,6 +203,10 @@ export interface Database {
           directions_note?: string | null;
           deposit_enabled?: boolean;
           deposit_amount?: number;
+          turnaround_minutes?: number;
+          slot_interval_minutes?: number;
+          lead_time_minutes?: number;
+          max_advance_days?: number;
           updated_at?: string;
         };
         Relationships: [];

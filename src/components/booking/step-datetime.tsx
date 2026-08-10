@@ -21,7 +21,12 @@ import {
 } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
-type Slot = { startsAt: string; endsAt: string };
+/** Mirrors what `fetchSlotsAction` returns — no staff ids reach the browser. */
+type Slot = {
+  startsAt: string;
+  endsAt: string;
+  state: "available" | "booked" | "past";
+};
 
 type CalendarData = {
   minDay: DayKey;
@@ -71,6 +76,8 @@ export function StepDateTime({
   const current = slotKey && slotState?.key === slotKey ? slotState : null;
   const slots = current?.slots ?? null;
   const slotError = current?.error ?? null;
+  const bookable = slots?.filter((slot) => slot.state === "available") ?? [];
+  const taken = slots?.filter((slot) => slot.state === "booked").length ?? 0;
 
   // Which days to grey out. Refetched when the service or barber changes,
   // because a different barber keeps a different week.
@@ -162,7 +169,7 @@ export function StepDateTime({
           />
         ) : loadingSlots || slots === null ? (
           <SlotSkeleton day={day} />
-        ) : slots.length === 0 ? (
+        ) : bookable.length === 0 && slots.length === 0 ? (
           <NoSlots
             day={day}
             error={slotError}
@@ -180,7 +187,22 @@ export function StepDateTime({
               {formatDateLong(`${day}T12:00:00Z`)}
             </h2>
             <p className="mt-1 text-sm text-ink-400">
-              {slots.length} {slots.length === 1 ? "time" : "times"} available
+              {bookable.length === 0 ? (
+                <span className="text-ink-300">
+                  Every time is taken — try another day
+                </span>
+              ) : (
+                <>
+                  {bookable.length} {bookable.length === 1 ? "time" : "times"}{" "}
+                  available
+                  {taken > 0 && (
+                    <span className="text-ink-600">
+                      {" "}
+                      · {taken} booked
+                    </span>
+                  )}
+                </>
+              )}
             </p>
 
             <fieldset className="mt-5">
@@ -188,6 +210,35 @@ export function StepDateTime({
               <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-4 lg:grid-cols-5">
                 {slots.map((slot) => {
                   const checked = startsAt === slot.startsAt;
+                  const open = slot.state === "available";
+
+                  // Taken and already-gone times stay on the grid rather than
+                  // vanishing: a gap in the times is confusing, whereas a
+                  // struck-through 3pm plainly says someone got there first.
+                  if (!open) {
+                    return (
+                      <div
+                        key={slot.startsAt}
+                        aria-disabled
+                        title={
+                          slot.state === "booked"
+                            ? "Already booked"
+                            : "This time has passed"
+                        }
+                        className="flex select-none items-center justify-center rounded-lg border border-white/5 bg-ink-950/60 py-3 text-sm font-medium tabular-nums text-ink-600"
+                      >
+                        <span className="line-through decoration-ink-700">
+                          {formatTime(slot.startsAt)}
+                        </span>
+                        <span className="sr-only">
+                          {slot.state === "booked"
+                            ? " — already booked"
+                            : " — this time has passed"}
+                        </span>
+                      </div>
+                    );
+                  }
+
                   return (
                     <label
                       key={slot.startsAt}

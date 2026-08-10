@@ -1,13 +1,21 @@
 import "server-only";
 
-import { MAX_ADVANCE_BOOKING_DAYS } from "@/lib/shop";
 import {
+  BOOKING_BUFFER_MINUTES,
+  MAX_ADVANCE_BOOKING_DAYS,
+  MIN_LEAD_TIME_MINUTES,
+  SLOT_INTERVAL_MINUTES,
+} from "@/lib/shop";
+import {
+  generateSlotGrid,
   generateSlots,
   groupIntervals,
   openingWindowFor,
   type AvailableSlot,
+  type BookingRules,
   type ClosureRow,
   type ShopHoursRow,
+  type SlotView,
 } from "@/lib/slots";
 import { createAdminClient } from "@/lib/supabase/server";
 import {
@@ -33,7 +41,38 @@ import {
  * the browser. Callers get start times and nothing else.
  */
 
-export type { AvailableSlot } from "@/lib/slots";
+export type { AvailableSlot, SlotView } from "@/lib/slots";
+
+/**
+ * The shop's timing rules, or the compiled-in defaults.
+ *
+ * Reads `*` rather than naming columns so a database that predates migration
+ * 0006 keeps working on the defaults instead of failing the whole query.
+ */
+async function bookingRules(): Promise<BookingRules & { maxAdvanceDays: number }> {
+  const fallback = {
+    slotIntervalMinutes: SLOT_INTERVAL_MINUTES,
+    turnaroundMinutes: BOOKING_BUFFER_MINUTES,
+    leadTimeMinutes: MIN_LEAD_TIME_MINUTES,
+    maxAdvanceDays: MAX_ADVANCE_BOOKING_DAYS,
+  };
+
+  try {
+    const db = createAdminClient();
+    const { data } = await db.from("shop_settings").select("*").maybeSingle();
+    if (!data) return fallback;
+
+    const row = data as Partial<typeof data>;
+    return {
+      slotIntervalMinutes: row.slot_interval_minutes ?? fallback.slotIntervalMinutes,
+      turnaroundMinutes: row.turnaround_minutes ?? fallback.turnaroundMinutes,
+      leadTimeMinutes: row.lead_time_minutes ?? fallback.leadTimeMinutes,
+      maxAdvanceDays: row.max_advance_days ?? fallback.maxAdvanceDays,
+    };
+  } catch {
+    return fallback;
+  }
+}
 
 /** Barbers who are active *and* offer this service. */
 async function eligibleStaffIds(
@@ -81,11 +120,12 @@ export async function getDayAvailability({
   now?: Date;
 }): Promise<AvailableSlot[]> {
   const db = createAdminClient();
+  const rules = await bookingRules();
 
   // Never generate slots outside the bookable window.
   const today = todayInShop(now);
   if (day < today) return [];
-  if (day > shiftDayKey(today, MAX_ADVANCE_BOOKING_DAYS)) return [];
+  if (day > shiftDayKey(today, rules.maxAdvanceDays)) return [];
 
   const { data: service } = await db
     .from("services")
@@ -151,6 +191,96 @@ export async function getDayAvailability({
     busyByStaff: groupIntervals(bookings ?? []),
     offByStaff: groupIntervals(timeOff ?? []),
     now,
+    rules,
+  });
+}
+
+/**
+ * The full grid for a day — every candidate time, labelled available, booked
+ * or past.
+ *
+ * Same inputs and same code path as `getDayAvailability`; this one just keeps
+ * the times it would otherwise drop, so the picker can show a booked slot as
+ * booked instead of silently omitting it.
+ *
+ * `staffIds` is stripped before this leaves the server. Which *chair* is free
+ * is the shop's business; that a time is taken is the customer's.
+ */
+export async function getDaySlotGrid({
+  serviceId,
+  staffId = null,
+  day,
+  now = new Date(),
+}: {
+  serviceId: string;
+  staffId?: string | null;
+  day: DayKey;
+  now?: Date;
+}): Promise<SlotView[]> {
+  const db = createAdminClient();
+  const rules = await bookingRules();
+
+  const today = todayInShop(now);
+  if (day < today) return [];
+  if (day > shiftDayKey(today, rules.maxAdvanceDays)) return [];
+
+  const { data: service } = await db
+    .from("services")
+    .select("id, duration_minutes, is_active")
+    .eq("id", serviceId)
+    .maybeSingle();
+  if (!service || !service.is_active) return [];
+
+  const staffIds = await eligibleStaffIds(serviceId, staffId);
+  if (!staffIds.length) return [];
+
+  const dayStart = shopWallTime(day, "00:00");
+  const dayEnd = shopWallTime(shiftDayKey(day, 1), "00:00");
+
+  const [
+    { data: shifts },
+    { data: bookings },
+    { data: timeOff },
+    { data: shopHours },
+    { data: closures },
+  ] = await Promise.all([
+    db
+      .from("working_hours")
+      .select("staff_id, start_time, end_time")
+      .in("staff_id", staffIds)
+      .eq("day_of_week", dayOfWeek(day)),
+    db
+      .from("bookings")
+      .select("staff_id, starts_at, ends_at")
+      .in("staff_id", staffIds)
+      .neq("status", "cancelled")
+      .lt("starts_at", dayEnd.toISOString())
+      .gt("ends_at", dayStart.toISOString()),
+    db
+      .from("time_off")
+      .select("staff_id, starts_at, ends_at")
+      .in("staff_id", staffIds)
+      .lt("starts_at", dayEnd.toISOString())
+      .gt("ends_at", dayStart.toISOString()),
+    db.from("shop_hours").select("day_of_week, is_open, opens, closes"),
+    db
+      .from("shop_closures")
+      .select("starts_on, ends_on")
+      .lte("starts_on", day)
+      .gte("ends_on", day),
+  ]);
+
+  if (!shifts?.length) return [];
+
+  return generateSlotGrid({
+    day,
+    durationMinutes: service.duration_minutes,
+    shifts,
+    opening: resolveOpening(day, shopHours, closures),
+    busyByStaff: groupIntervals(bookings ?? []),
+    offByStaff: groupIntervals(timeOff ?? []),
+    now,
+    rules,
   });
 }
 
@@ -199,8 +329,9 @@ export async function getBookingCalendar({
 }): Promise<BookingCalendar> {
   const db = createAdminClient();
 
+  const rules = await bookingRules();
   const minDay = todayInShop(now);
-  const maxDay = shiftDayKey(minDay, MAX_ADVANCE_BOOKING_DAYS);
+  const maxDay = shiftDayKey(minDay, rules.maxAdvanceDays);
 
   const staffIds = await eligibleStaffIds(serviceId, staffId);
   if (!staffIds.length) {

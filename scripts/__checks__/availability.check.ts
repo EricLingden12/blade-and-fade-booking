@@ -12,6 +12,13 @@ import { fromZonedTime } from "date-fns-tz";
 
 import { generateSlots, type Interval } from "@/lib/slots";
 
+/** The shop's shipped defaults, so these checks assert the documented rules. */
+const RULES = {
+  slotIntervalMinutes: 15,
+  turnaroundMinutes: 10,
+  leadTimeMinutes: 30,
+};
+
 const DAY = "2026-08-10"; // a Monday
 const TZ = "Asia/Dubai";
 
@@ -66,6 +73,7 @@ check(
       busyByStaff: NOBODY,
       offByStaff: NOBODY,
       now: LONG_AGO,
+      rules: RULES,
     }),
   ),
   ["09:00", "09:15", "09:30", "09:45", "10:00", "10:15"],
@@ -81,6 +89,7 @@ check(
       busyByStaff: NOBODY,
       offByStaff: NOBODY,
       now: LONG_AGO,
+      rules: RULES,
     }),
   ),
   ["09:15", "09:30", "09:45", "10:00"],
@@ -101,6 +110,7 @@ check(
       busyByStaff: new Map([["a", [interval("10:00", "10:30")]]]),
       offByStaff: NOBODY,
       now: LONG_AGO,
+      rules: RULES,
     }),
   ),
   ["09:00", "09:15", "10:45", "11:00", "11:15", "11:30"],
@@ -116,6 +126,7 @@ check(
       busyByStaff: new Map([["a", [interval("09:15", "09:30")]]]),
       offByStaff: NOBODY,
       now: LONG_AGO,
+      rules: RULES,
     }),
   ),
   ["09:45"],
@@ -134,6 +145,7 @@ check(
       busyByStaff: NOBODY,
       offByStaff: new Map([["a", [interval("10:00", "11:00")]]]),
       now: LONG_AGO,
+      rules: RULES,
     }),
   ),
   ["09:00", "09:15", "09:30", "11:00", "11:15", "11:30"],
@@ -148,6 +160,7 @@ check(
     busyByStaff: NOBODY,
     offByStaff: new Map([["a", [interval("00:00", "23:59")]]]),
     now: LONG_AGO,
+    rules: RULES,
   }),
   [],
 );
@@ -166,6 +179,7 @@ check(
       offByStaff: NOBODY,
       // 09:20 shop time -> earliest bookable is 09:50 -> first grid point 10:00
       now: at("09:20"),
+      rules: RULES,
     }),
   ),
   ["10:00", "10:15", "10:30"],
@@ -180,6 +194,7 @@ check(
     busyByStaff: NOBODY,
     offByStaff: NOBODY,
     now: at("23:00"),
+    rules: RULES,
   }),
   [],
 );
@@ -200,6 +215,7 @@ check(
       busyByStaff: NOBODY,
       offByStaff: NOBODY,
       now: LONG_AGO,
+      rules: RULES,
     }),
   ),
   ["09:00", "09:15", "09:30", "09:45", "10:00", "14:00", "14:15", "14:30", "14:45", "15:00"],
@@ -218,6 +234,7 @@ check(
     busyByStaff: new Map([["a", [interval("09:00", "09:30")]]]),
     offByStaff: NOBODY,
     now: LONG_AGO,
+    rules: RULES,
   });
 
   // Barber a's 09:00–09:30 booking, padded by the buffer, swallows every slot
@@ -246,6 +263,7 @@ check(
     busyByStaff: NOBODY,
     offByStaff: NOBODY,
     now: LONG_AGO,
+    rules: RULES,
   });
   check("a slot both barbers can take lists both", slots[0]?.staffIds, [
     "a",
@@ -265,6 +283,7 @@ check(
     busyByStaff: NOBODY,
     offByStaff: NOBODY,
     now: LONG_AGO,
+    rules: RULES,
   });
   check("overlapping duplicate shifts don't duplicate the barber", slots[0]?.staffIds, ["a"]);
 }
@@ -282,6 +301,7 @@ check(
       busyByStaff: new Map([["a", [interval("09:00", "09:30")]]]),
       offByStaff: NOBODY,
       now: LONG_AGO,
+      rules: RULES,
     }),
   ),
   ["09:45", "10:00"],
@@ -296,6 +316,7 @@ check(
     busyByStaff: NOBODY,
     offByStaff: NOBODY,
     now: LONG_AGO,
+    rules: RULES,
   }),
   [],
 );

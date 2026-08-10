@@ -4,6 +4,12 @@ import { cache } from "react";
 
 import { DEFAULT_LOCATION, type ShopLocation } from "@/lib/location";
 import { DEFAULT_CURRENCY } from "@/lib/money";
+import {
+  BOOKING_BUFFER_MINUTES,
+  MAX_ADVANCE_BOOKING_DAYS,
+  MIN_LEAD_TIME_MINUTES,
+  SLOT_INTERVAL_MINUTES,
+} from "@/lib/shop";
 import { stripeConfigured } from "@/lib/stripe";
 import { createClient } from "@/lib/supabase/server";
 
@@ -14,10 +20,26 @@ export type DepositSettings = {
   amount: number;
 };
 
+export type BookingRuleSettings = {
+  turnaroundMinutes: number;
+  slotIntervalMinutes: number;
+  leadTimeMinutes: number;
+  maxAdvanceDays: number;
+};
+
 export type ShopSettings = {
   currency: string;
   location: ShopLocation;
   deposit: DepositSettings;
+  rules: BookingRuleSettings;
+};
+
+/** The shipped defaults, used until migration 0006 has run. */
+const DEFAULT_RULES: BookingRuleSettings = {
+  turnaroundMinutes: BOOKING_BUFFER_MINUTES,
+  slotIntervalMinutes: SLOT_INTERVAL_MINUTES,
+  leadTimeMinutes: MIN_LEAD_TIME_MINUTES,
+  maxAdvanceDays: MAX_ADVANCE_BOOKING_DAYS,
 };
 
 const FALLBACK: ShopSettings = {
@@ -26,6 +48,7 @@ const FALLBACK: ShopSettings = {
   // Falling back to "no deposit" is the only safe direction: a settings read
   // that failed must never cause a customer to be charged.
   deposit: { enabled: false, amount: 0 },
+  rules: DEFAULT_RULES,
 };
 
 /**
@@ -89,6 +112,14 @@ export const getShopSettings = cache(async (): Promise<ShopSettings> => {
       deposit: {
         enabled: Boolean(row.deposit_enabled),
         amount: Number(row.deposit_amount ?? 0),
+      },
+      rules: {
+        turnaroundMinutes:
+          row.turnaround_minutes ?? DEFAULT_RULES.turnaroundMinutes,
+        slotIntervalMinutes:
+          row.slot_interval_minutes ?? DEFAULT_RULES.slotIntervalMinutes,
+        leadTimeMinutes: row.lead_time_minutes ?? DEFAULT_RULES.leadTimeMinutes,
+        maxAdvanceDays: row.max_advance_days ?? DEFAULT_RULES.maxAdvanceDays,
       },
     };
   } catch {

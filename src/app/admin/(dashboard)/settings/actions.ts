@@ -212,3 +212,70 @@ export async function updateLocationAction(
     message: pin ? "Location saved." : "Address saved. No map pin set.",
   };
 }
+
+/* -------------------------------------------------------------------------- */
+/* Booking rules                                                              */
+/* -------------------------------------------------------------------------- */
+
+const rulesSchema = z.object({
+  turnaroundMinutes: z
+    .number()
+    .int()
+    .min(0, "The gap can't be negative")
+    .max(120, "Two hours between cuts is probably not what you meant"),
+  // Constrained to divisors of 60: anything else drifts offered times away
+  // from the clock (09:00, 09:07, 09:14 …), which reads as broken.
+  slotIntervalMinutes: z
+    .union([
+      z.literal(5),
+      z.literal(10),
+      z.literal(15),
+      z.literal(20),
+      z.literal(30),
+      z.literal(60),
+    ])
+    .describe("must divide the hour"),
+  leadTimeMinutes: z
+    .number()
+    .int()
+    .min(0, "Notice can't be negative")
+    .max(10080, "A week is the most notice you can require"),
+  maxAdvanceDays: z
+    .number()
+    .int()
+    .min(1, "Customers need at least one day to book")
+    .max(365, "A year ahead is the maximum"),
+});
+
+export async function updateBookingRulesAction(input: {
+  turnaroundMinutes: number;
+  slotIntervalMinutes: number;
+  leadTimeMinutes: number;
+  maxAdvanceDays: number;
+}): Promise<ActionResult> {
+  const parsed = rulesSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid." };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("shop_settings")
+    .update({
+      turnaround_minutes: parsed.data.turnaroundMinutes,
+      slot_interval_minutes: parsed.data.slotIntervalMinutes,
+      lead_time_minutes: parsed.data.leadTimeMinutes,
+      max_advance_days: parsed.data.maxAdvanceDays,
+    })
+    .eq("id", true);
+
+  if (error) {
+    console.error("[admin] updateBookingRules:", error.message);
+    return { ok: false, message: "Couldn't save the booking rules." };
+  }
+
+  // These reshape every offered slot, so the booking pages must not be stale.
+  revalidatePath("/", "layout");
+
+  return { ok: true, message: "Booking rules saved." };
+}

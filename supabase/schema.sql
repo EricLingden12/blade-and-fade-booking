@@ -218,6 +218,13 @@ create table if not exists public.shop_settings (
   deposit_enabled boolean not null default false,
   deposit_amount  numeric(10, 2) not null default 0,
 
+  -- The rules that shape every offered slot. Per-service length is not here —
+  -- that lives on services.duration_minutes.
+  turnaround_minutes    integer not null default 10,
+  slot_interval_minutes integer not null default 15,
+  lead_time_minutes     integer not null default 30,
+  max_advance_days      integer not null default 60,
+
   updated_at      timestamptz not null default now(),
 
   constraint shop_settings_singleton check (id),
@@ -251,6 +258,20 @@ create table if not exists public.shop_settings (
   -- app from ever asking Stripe to charge zero.
   constraint shop_settings_deposit_enabled_needs_amount check (
     not deposit_enabled or deposit_amount > 0
+  ),
+  constraint shop_settings_turnaround_sane check (
+    turnaround_minutes >= 0 and turnaround_minutes <= 120
+  ),
+  -- Must divide the hour, or offered times drift off the clock: a 7-minute
+  -- grid gives 09:00, 09:07, 09:14 … which reads as broken, not precise.
+  constraint shop_settings_slot_interval_sane check (
+    slot_interval_minutes in (5, 10, 15, 20, 30, 60)
+  ),
+  constraint shop_settings_lead_time_sane check (
+    lead_time_minutes >= 0 and lead_time_minutes <= 10080
+  ),
+  constraint shop_settings_max_advance_sane check (
+    max_advance_days >= 1 and max_advance_days <= 365
   )
 );
 

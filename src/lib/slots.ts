@@ -1,9 +1,4 @@
 import {
-  BOOKING_BUFFER_MINUTES,
-  MIN_LEAD_TIME_MINUTES,
-  SLOT_INTERVAL_MINUTES,
-} from "@/lib/shop";
-import {
   dayOfWeek,
   minutesToWallTime,
   shopWallTime,
@@ -34,6 +29,36 @@ export type AvailableSlot = {
   staffIds: string[];
 };
 
+/**
+ * Why a time isn't offered.
+ *
+ * `booked` covers "the chair isn't free", which includes the turnaround gap
+ * around a neighbouring appointment — from a customer's side those are the
+ * same thing, and distinguishing them would leak the shop's exact schedule.
+ */
+export type SlotState = "available" | "booked" | "past";
+
+export type SlotView = {
+  startsAt: string;
+  endsAt: string;
+  state: SlotState;
+  /** Only populated for available slots; never sent to the browser. */
+  staffIds: string[];
+};
+
+/**
+ * The timing rules that shape every offered slot.
+ *
+ * Passed in rather than imported so the engine stays pure and the shop can
+ * change them without a deploy. Per-service length is not here — that comes
+ * from the service row itself.
+ */
+export type BookingRules = {
+  slotIntervalMinutes: number;
+  turnaroundMinutes: number;
+  leadTimeMinutes: number;
+};
+
 /** Half-open `[start, end)` in epoch milliseconds. */
 export type Interval = { start: number; end: number };
 
@@ -61,7 +86,14 @@ function roundUpTo(value: number, step: number): number {
   return Math.ceil(value / step) * step;
 }
 
-export function generateSlots({
+/**
+ * Every candidate start time for a day, each labelled available, booked or
+ * past — the whole grid, not just what's for sale.
+ *
+ * A time is only `booked` when *no* eligible barber can take it. With "any
+ * barber" chosen, one free chair is enough to keep the slot available.
+ */
+export function generateSlotGrid({
   day,
   durationMinutes,
   shifts,
@@ -69,39 +101,30 @@ export function generateSlots({
   busyByStaff,
   offByStaff,
   now,
+  rules,
 }: {
   day: DayKey;
   durationMinutes: number;
   shifts: Shift[];
-  /**
-   * Shop opening hours for this day. Barber shifts are clamped to it, so a rota
-   * that runs past closing stops selling at closing. Omit (or pass `undefined`)
-   * to skip the clamp entirely; pass `null` to mean "shut".
-   */
   opening?: OpeningWindow;
-  /** Non-cancelled bookings, keyed by barber. */
   busyByStaff: Map<string, Interval[]>;
-  /** Time-off blocks, keyed by barber. */
   offByStaff: Map<string, Interval[]>;
   now: Date;
-}): AvailableSlot[] {
-  // Shut is shut: a barber rostered on a closed day still sells nothing.
+  rules: BookingRules;
+}): SlotView[] {
   if (opening === null) return [];
 
   const openFrom = opening ? wallTimeToMinutes(opening.opens) : null;
   const openUntil = opening ? wallTimeToMinutes(opening.closes) : null;
 
-  const bufferMs = BOOKING_BUFFER_MINUTES * 60_000;
+  const bufferMs = rules.turnaroundMinutes * 60_000;
   const durationMs = durationMinutes * 60_000;
-  const earliest = now.getTime() + MIN_LEAD_TIME_MINUTES * 60_000;
+  const earliest = now.getTime() + rules.leadTimeMinutes * 60_000;
 
-  // start ISO -> barbers free then
-  const found = new Map<string, string[]>();
+  // start ISO -> the best state any barber can offer for it
+  const grid = new Map<string, { state: SlotState; staffIds: string[] }>();
 
   for (const shift of shifts) {
-    // Intersect the barber's shift with the shop's opening window. A barber
-    // rostered 09:00-19:00 in a shop that opens at 10:00 starts selling at
-    // 10:00; one whose whole shift falls outside opening hours sells nothing.
     const windowStart = Math.max(
       wallTimeToMinutes(shift.start_time),
       openFrom ?? Number.NEGATIVE_INFINITY,
@@ -114,46 +137,75 @@ export function generateSlots({
 
     const busy = busyByStaff.get(shift.staff_id) ?? [];
     const off = offByStaff.get(shift.staff_id) ?? [];
-
-    // Candidates sit on a clean 15-minute grid even if the shift starts at an
-    // odd minute, so customers never see 09:07 as an option.
-    const firstSlot = roundUpTo(windowStart, SLOT_INTERVAL_MINUTES);
+    const firstSlot = roundUpTo(windowStart, rules.slotIntervalMinutes);
 
     for (
       let minute = firstSlot;
       minute + durationMinutes <= windowEnd;
-      minute += SLOT_INTERVAL_MINUTES
+      minute += rules.slotIntervalMinutes
     ) {
       const startsAt = shopWallTime(day, minutesToWallTime(minute));
       const start = startsAt.getTime();
       const end = start + durationMs;
-
-      // Past, or inside the minimum lead time.
-      if (start < earliest) continue;
-
-      // Turnover buffer on both sides of every existing appointment.
-      const padded = { start: start - bufferMs, end: end + bufferMs };
-      if (busy.some((interval) => overlaps(padded, interval))) continue;
-
-      // Time off is hard — no buffer, but no overlap either.
-      if (off.some((interval) => overlaps({ start, end }, interval))) continue;
-
       const iso = startsAt.toISOString();
-      const existing = found.get(iso);
-      if (existing) existing.push(shift.staff_id);
-      else found.set(iso, [shift.staff_id]);
+
+      const padded = { start: start - bufferMs, end: end + bufferMs };
+      const taken =
+        busy.some((interval) => overlaps(padded, interval)) ||
+        off.some((interval) => overlaps({ start, end }, interval));
+
+      const state: SlotState =
+        start < earliest ? "past" : taken ? "booked" : "available";
+
+      const existing = grid.get(iso);
+      if (!existing) {
+        grid.set(iso, {
+          state,
+          staffIds: state === "available" ? [shift.staff_id] : [],
+        });
+        continue;
+      }
+
+      // One free barber makes the whole slot bookable, so "available" wins.
+      if (state === "available") {
+        existing.state = "available";
+        existing.staffIds.push(shift.staff_id);
+      }
     }
   }
 
-  return [...found.entries()]
+  return [...grid.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([startsAt, ids]) => ({
+    .map(([startsAt, entry]) => ({
       startsAt,
       endsAt: new Date(new Date(startsAt).getTime() + durationMs).toISOString(),
-      // De-duplicate: a split shift can offer the same minute twice.
-      staffIds: [...new Set(ids)],
+      state: entry.state,
+      staffIds: [...new Set(entry.staffIds)],
     }));
 }
+
+/**
+ * The bookable subset of the grid.
+ *
+ * Defined in terms of `generateSlotGrid` so the two can never disagree about
+ * what "free" means — the availability the customer sees and the availability
+ * the server re-checks at booking time come from the same code path.
+ */
+export function generateSlots(input: {
+  day: DayKey;
+  durationMinutes: number;
+  shifts: Shift[];
+  opening?: OpeningWindow;
+  busyByStaff: Map<string, Interval[]>;
+  offByStaff: Map<string, Interval[]>;
+  now: Date;
+  rules: BookingRules;
+}): AvailableSlot[] {
+  return generateSlotGrid(input)
+    .filter((slot) => slot.state === "available")
+    .map(({ startsAt, endsAt, staffIds }) => ({ startsAt, endsAt, staffIds }));
+}
+
 
 export type ShopHoursRow = {
   day_of_week: number;

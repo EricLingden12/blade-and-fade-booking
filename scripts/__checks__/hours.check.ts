@@ -18,12 +18,20 @@ import { fromZonedTime } from "date-fns-tz";
 
 import {
   closureFor,
+  generateSlotGrid,
   generateSlots,
   openingWindowFor,
   type ClosureRow,
   type Interval,
   type ShopHoursRow,
 } from "@/lib/slots";
+
+/** The shop's shipped defaults, so these checks assert the documented rules. */
+const RULES = {
+  slotIntervalMinutes: 15,
+  turnaroundMinutes: 10,
+  leadTimeMinutes: 30,
+};
 
 const MONDAY = "2026-08-10";
 const SUNDAY = "2026-08-09";
@@ -143,6 +151,7 @@ check(
       busyByStaff: NOBODY,
       offByStaff: NOBODY,
       now: LONG_AGO,
+      rules: RULES,
     }),
   ),
   ["09:00", "09:15", "09:30", "09:45", "10:00", "10:15", "10:30", "10:45", "11:00"],
@@ -159,6 +168,7 @@ check(
       busyByStaff: NOBODY,
       offByStaff: NOBODY,
       now: LONG_AGO,
+      rules: RULES,
     }),
   ),
   ["10:00", "10:15", "10:30", "10:45", "11:00"],
@@ -175,6 +185,7 @@ check(
       busyByStaff: NOBODY,
       offByStaff: NOBODY,
       now: LONG_AGO,
+      rules: RULES,
     }),
   ),
   ["09:00", "09:15", "09:30", "09:45", "10:00"],
@@ -191,6 +202,7 @@ check(
       busyByStaff: NOBODY,
       offByStaff: NOBODY,
       now: LONG_AGO,
+      rules: RULES,
     }),
   ),
   [],
@@ -207,6 +219,7 @@ check(
       busyByStaff: NOBODY,
       offByStaff: NOBODY,
       now: LONG_AGO,
+      rules: RULES,
     }),
   ),
   [],
@@ -223,6 +236,7 @@ check(
       busyByStaff: NOBODY,
       offByStaff: NOBODY,
       now: LONG_AGO,
+      rules: RULES,
     }),
   ),
   ["09:00", "09:15", "09:30", "09:45", "10:00", "10:15", "10:30", "10:45", "11:00"],
@@ -242,6 +256,7 @@ check(
       busyByStaff: NOBODY,
       offByStaff: NOBODY,
       now: LONG_AGO,
+      rules: RULES,
     }),
   ),
   ["09:00", "09:15", "09:30", "09:45", "10:00", "10:15", "10:30", "10:45", "11:00"],
@@ -260,6 +275,7 @@ check(
     busyByStaff: NOBODY,
     offByStaff: NOBODY,
     now: LONG_AGO,
+    rules: RULES,
   }).find(
     (slot) =>
       new Date(slot.startsAt).getTime() ===
@@ -279,9 +295,169 @@ check(
       busyByStaff: NOBODY,
       offByStaff: NOBODY,
       now: LONG_AGO,
+      rules: RULES,
     }),
   ),
   ["09:00", "09:15"],
+);
+
+console.log("\ngenerateSlotGrid — booked and past times stay on the grid");
+
+const BUSY = new Map<string, Interval[]>([
+  [
+    "a",
+    [
+      {
+        start: fromZonedTime(`${MONDAY}T10:00:00`, TZ).getTime(),
+        end: fromZonedTime(`${MONDAY}T10:30:00`, TZ).getTime(),
+      },
+    ],
+  ],
+]);
+
+const grid = generateSlotGrid({
+  day: MONDAY,
+  durationMinutes: 30,
+  shifts: [{ staff_id: "a", start_time: "09:00", end_time: "12:00" }],
+  busyByStaff: BUSY,
+  offByStaff: NOBODY,
+  now: LONG_AGO,
+  rules: RULES,
+});
+
+check(
+  "the whole shift is returned, not just what is free",
+  grid.length,
+  times(
+    generateSlots({
+      day: MONDAY,
+      durationMinutes: 30,
+      shifts: [{ staff_id: "a", start_time: "09:00", end_time: "12:00" }],
+      busyByStaff: NOBODY,
+      offByStaff: NOBODY,
+      now: LONG_AGO,
+      rules: RULES,
+    }),
+  ).length,
+);
+check(
+  "the booked half-hour is marked booked, not dropped",
+  grid.filter((s) => s.state === "booked").length > 0,
+  true,
+);
+check(
+  "10:00 itself is booked",
+  grid.find(
+    (s) =>
+      new Date(s.startsAt).getTime() ===
+      fromZonedTime(`${MONDAY}T10:00:00`, TZ).getTime(),
+  )?.state,
+  "booked",
+);
+check(
+  "the turnaround gap either side is booked too",
+  grid.find(
+    (s) =>
+      new Date(s.startsAt).getTime() ===
+      fromZonedTime(`${MONDAY}T09:45:00`, TZ).getTime(),
+  )?.state,
+  "booked",
+);
+check(
+  "a time well clear of the booking stays available",
+  grid.find(
+    (s) =>
+      new Date(s.startsAt).getTime() ===
+      fromZonedTime(`${MONDAY}T11:00:00`, TZ).getTime(),
+  )?.state,
+  "available",
+);
+check(
+  "generateSlots is exactly the available subset",
+  generateSlots({
+    day: MONDAY,
+    durationMinutes: 30,
+    shifts: [{ staff_id: "a", start_time: "09:00", end_time: "12:00" }],
+    busyByStaff: BUSY,
+    offByStaff: NOBODY,
+    now: LONG_AGO,
+    rules: RULES,
+  }).length,
+  grid.filter((s) => s.state === "available").length,
+);
+check(
+  "no barber ids leak onto a booked slot",
+  grid.filter((s) => s.state !== "available").every((s) => s.staffIds.length === 0),
+  true,
+);
+check(
+  "one free barber keeps a slot available for everyone",
+  generateSlotGrid({
+    day: MONDAY,
+    durationMinutes: 30,
+    shifts: [
+      { staff_id: "a", start_time: "09:00", end_time: "12:00" },
+      { staff_id: "b", start_time: "09:00", end_time: "12:00" },
+    ],
+    busyByStaff: BUSY,
+    offByStaff: NOBODY,
+    now: LONG_AGO,
+    rules: RULES,
+  }).find(
+    (s) =>
+      new Date(s.startsAt).getTime() ===
+      fromZonedTime(`${MONDAY}T10:00:00`, TZ).getTime(),
+  )?.state,
+  "available",
+);
+
+console.log("\ncustom booking rules");
+
+check(
+  "a 30-minute grid offers half-hourly times",
+  times(
+    generateSlots({
+      day: MONDAY,
+      durationMinutes: 30,
+      shifts: [{ staff_id: "a", start_time: "09:00", end_time: "11:00" }],
+      busyByStaff: NOBODY,
+      offByStaff: NOBODY,
+      now: LONG_AGO,
+      rules: { ...RULES, slotIntervalMinutes: 30 },
+    }),
+  ),
+  ["09:00", "09:30", "10:00", "10:30"],
+);
+check(
+  "zero turnaround lets a slot butt straight up to a booking",
+  generateSlotGrid({
+    day: MONDAY,
+    durationMinutes: 30,
+    shifts: [{ staff_id: "a", start_time: "09:00", end_time: "12:00" }],
+    busyByStaff: BUSY,
+    offByStaff: NOBODY,
+    now: LONG_AGO,
+    rules: { ...RULES, turnaroundMinutes: 0 },
+  }).find(
+    (s) =>
+      new Date(s.startsAt).getTime() ===
+      fromZonedTime(`${MONDAY}T09:30:00`, TZ).getTime(),
+  )?.state,
+  "available",
+);
+check(
+  "a longer turnaround blocks more around the same booking",
+  generateSlotGrid({
+    day: MONDAY,
+    durationMinutes: 30,
+    shifts: [{ staff_id: "a", start_time: "09:00", end_time: "12:00" }],
+    busyByStaff: BUSY,
+    offByStaff: NOBODY,
+    now: LONG_AGO,
+    rules: { ...RULES, turnaroundMinutes: 30 },
+  }).filter((s) => s.state === "booked").length >
+    grid.filter((s) => s.state === "booked").length,
+  true,
 );
 
 if (failures > 0) {
